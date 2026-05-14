@@ -1,0 +1,274 @@
+package cmdbaseline
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/StephanSchmidt/loupe/internal/analyze"
+	"github.com/StephanSchmidt/loupe/internal/auth"
+	"github.com/StephanSchmidt/loupe/internal/config"
+	"github.com/StephanSchmidt/loupe/internal/deck"
+	"github.com/StephanSchmidt/loupe/internal/githost"
+	"github.com/StephanSchmidt/loupe/internal/githost/bitbucket"
+	"github.com/StephanSchmidt/loupe/internal/ingest"
+	"github.com/StephanSchmidt/loupe/internal/store"
+	"github.com/StephanSchmidt/loupe/internal/tracker"
+	"github.com/StephanSchmidt/loupe/internal/tracker/jira"
+)
+
+const (
+	defaultConfigPath = "loupe.yaml"
+	stateDBPath       = ".loupe/state.db"
+)
+
+// Hidden flag names — used by smoke tests / CI; not advertised in `--help`.
+const (
+	flagBitbucketToken   = "bitbucket-token"
+	flagJiraToken        = "jira-token"
+	flagBitbucketBaseURL = "bitbucket-base-url"
+	flagJiraBaseURL      = "jira-base-url"
+)
+
+func BuildBaselineCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "baseline",
+		Short: "First run — ingest from configured providers and render the deck",
+		Long: `Indexes every workspace + project the supplied credentials can see,
+detects AI adoption, and renders a reveal.js deck under <output.path>/<timestamp>/.
+
+Tokens are prompted (echo off) every invocation — no env vars in v0.`,
+		SilenceUsage: true,
+		RunE:         runBaseline,
+	}
+
+	cmd.Flags().String("config", defaultConfigPath, "path to loupe.yaml")
+	cmd.Flags().String("cutover-date", "", "override AI-adoption cutover (YYYY-MM-DD)")
+	cmd.Flags().Bool("dry-run", false, "validate config without writing state")
+
+	// Hidden test-only flags. Documented surface stays "every invocation prompts".
+	cmd.Flags().String(flagBitbucketToken, "", "")
+	cmd.Flags().String(flagJiraToken, "", "")
+	cmd.Flags().String(flagBitbucketBaseURL, "", "")
+	cmd.Flags().String(flagJiraBaseURL, "", "")
+	for _, f := range []string{flagBitbucketToken, flagJiraToken, flagBitbucketBaseURL, flagJiraBaseURL} {
+		_ = cmd.Flags().MarkHidden(f)
+	}
+
+	return cmd
+}
+
+type baselineOpts struct {
+	cfg         *config.Config
+	override    time.Time
+	bbToken     string
+	jiraToken   string
+	bbBaseURL   string
+	jiraBaseURL string
+	out         io.Writer
+}
+
+func runBaseline(cmd *cobra.Command, args []string) error {
+	opts, dryRun, err := loadBaselineOpts(cmd)
+	if err != nil {
+		return err
+	}
+	if dryRun {
+		_, _ = fmt.Fprintln(opts.out, "config valid; --dry-run set, not writing state")
+		return nil
+	}
+	gh, err := buildGitHost(opts.cfg, opts.bbToken, opts.bbBaseURL)
+	if err != nil {
+		return err
+	}
+	trk, err := buildTracker(opts.cfg, opts.jiraToken, opts.jiraBaseURL)
+	if err != nil {
+		return err
+	}
+	return runPipeline(context.Background(), opts, gh, trk)
+}
+
+// loadBaselineOpts pulls config + flags + interactive prompts together.
+// Returns dryRun as a separate bool so runBaseline can short-circuit
+// before constructing API clients.
+func loadBaselineOpts(cmd *cobra.Command) (*baselineOpts, bool, error) {
+	configPath, _ := cmd.Flags().GetString("config")
+	cutoverFlag, _ := cmd.Flags().GetString("cutover-date")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	bbToken, _ := cmd.Flags().GetString(flagBitbucketToken)
+	jiraToken, _ := cmd.Flags().GetString(flagJiraToken)
+	bbBaseURL, _ := cmd.Flags().GetString(flagBitbucketBaseURL)
+	jiraBaseURL, _ := cmd.Flags().GetString(flagJiraBaseURL)
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return nil, false, err
+	}
+	override, err := resolveCutoverOverride(cutoverFlag, cfg.AIAdoption.CutoverDate)
+	if err != nil {
+		return nil, false, err
+	}
+	if !dryRun {
+		bbToken, err = ensureToken(bbToken, "Bitbucket app password")
+		if err != nil {
+			return nil, false, err
+		}
+		jiraToken, err = ensureToken(jiraToken, "Jira API token")
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	return &baselineOpts{
+		cfg: cfg, override: override,
+		bbToken: bbToken, jiraToken: jiraToken,
+		bbBaseURL: bbBaseURL, jiraBaseURL: jiraBaseURL,
+		out: cmd.OutOrStdout(),
+	}, dryRun, nil
+}
+
+func runPipeline(ctx context.Context, opts *baselineOpts, gh githost.GitHost, trk tracker.Tracker) error {
+	s, err := store.Open(stateDBPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = s.Close() }()
+
+	if err := runIngest(ctx, s, gh, trk, opts.out); err != nil {
+		return err
+	}
+	weeks, cutover, err := runAnalyze(ctx, s, opts)
+	if err != nil {
+		return err
+	}
+	return renderAndAnnounce(opts, weeks, cutover, s)
+}
+
+func runIngest(ctx context.Context, s *store.Store, gh githost.GitHost, trk tracker.Tracker, out io.Writer) error {
+	_, _ = fmt.Fprintf(out, "Indexing git host (%s)...\n", gh.Name())
+	ghStats, err := ingest.IngestGitHost(ctx, s, gh, out)
+	if err != nil {
+		return fmt.Errorf("ingest git host: %w", err)
+	}
+	_, _ = fmt.Fprintf(out, "  %d workspaces, %d repos, %d commits, %d PRs\n",
+		ghStats.Workspaces, ghStats.Repos, ghStats.Commits, ghStats.PullRequests)
+	if ghStats.Commits == 0 {
+		return fmt.Errorf("no commits indexed — is the Bitbucket credential correct?")
+	}
+	_, _ = fmt.Fprintf(out, "Indexing tracker (%s)...\n", trk.Name())
+	tStats, err := ingest.IngestTracker(ctx, s, trk, out)
+	if err != nil {
+		return fmt.Errorf("ingest tracker: %w", err)
+	}
+	_, _ = fmt.Fprintf(out, "  %d projects, %d tickets\n", tStats.Projects, tStats.Issues)
+	return nil
+}
+
+func runAnalyze(ctx context.Context, s *store.Store, opts *baselineOpts) ([]analyze.WeekStats, analyze.Cutover, error) {
+	nSignals, err := analyze.DetectAndStore(ctx, s)
+	if err != nil {
+		return nil, analyze.Cutover{}, fmt.Errorf("detect AI signals: %w", err)
+	}
+	_, _ = fmt.Fprintf(opts.out, "  %d AI signals detected\n", nSignals)
+
+	weeks, err := analyze.WeeklyStats(ctx, s)
+	if err != nil {
+		return nil, analyze.Cutover{}, err
+	}
+	cutover, err := analyze.DetectCutover(ctx, s, opts.cfg.AIAdoption.MinWeeklyCommitsForCutover, opts.override)
+	if err != nil {
+		return nil, analyze.Cutover{}, err
+	}
+	logCutover(opts.out, cutover)
+	return weeks, cutover, nil
+}
+
+func logCutover(out io.Writer, c analyze.Cutover) {
+	switch c.Reason {
+	case analyze.CutoverReasonAuto:
+		_, _ = fmt.Fprintf(out, "  cutover: %s (auto)\n", c.Date.Format("2006-01-02"))
+	case analyze.CutoverReasonOverride:
+		_, _ = fmt.Fprintf(out, "  cutover: %s (config override)\n", c.Date.Format("2006-01-02"))
+	default:
+		_, _ = fmt.Fprintln(out, "  cutover: not detected — proceeding with throughput-only view")
+	}
+}
+
+func renderAndAnnounce(opts *baselineOpts, weeks []analyze.WeekStats, cutover analyze.Cutover, s *store.Store) error {
+	_ = s // reserved for future store-derived metadata in the deck (e.g. scope text)
+
+	runID := time.Now().UTC().Format("2006-01-02T15-04-05Z")
+	deckDir := filepath.Join(opts.cfg.Output.Path, runID)
+	if err := os.MkdirAll(filepath.Dir(deckDir), 0o750); err != nil {
+		return fmt.Errorf("create reports dir: %w", err)
+	}
+	if err := deck.RenderDeck(deckDir, opts.cfg, weeks, cutover, time.Now().UTC()); err != nil {
+		return fmt.Errorf("render deck: %w", err)
+	}
+	_, _ = fmt.Fprintf(opts.out, "\nDeck ready: %s/index.html\n", deckDir)
+	_, _ = fmt.Fprintln(opts.out, "Run `loupe present` to view.")
+	return nil
+}
+
+// ensureToken returns existing if non-empty, otherwise interactively
+// prompts. Smoke tests pass tokens via the hidden flags so no prompt fires.
+func ensureToken(existing, label string) (string, error) {
+	if existing != "" {
+		return existing, nil
+	}
+	tok, err := auth.PromptToken(label)
+	if err != nil {
+		return "", err
+	}
+	return tok, nil
+}
+
+// buildGitHost is the explicit registry for git-host providers. Adding a
+// case (e.g. ProviderGitLabCloud) is the full plug-in surface.
+func buildGitHost(cfg *config.Config, token, baseURLOverride string) (githost.GitHost, error) {
+	switch cfg.GitHost.Provider {
+	case config.ProviderBitbucketCloud:
+		base := cfg.GitHost.BaseURL
+		if baseURLOverride != "" {
+			base = baseURLOverride
+		}
+		return bitbucket.New(base, cfg.GitHost.Username, token)
+	default:
+		return nil, fmt.Errorf("unsupported git_host.provider %q", cfg.GitHost.Provider)
+	}
+}
+
+func buildTracker(cfg *config.Config, token, baseURLOverride string) (tracker.Tracker, error) {
+	switch cfg.Tracker.Provider {
+	case config.ProviderJiraCloud:
+		if baseURLOverride != "" {
+			return jira.NewWithBaseURL(baseURLOverride, cfg.Tracker.Email, token)
+		}
+		return jira.New(cfg.Tracker.Site, cfg.Tracker.Email, token)
+	default:
+		return nil, fmt.Errorf("unsupported tracker.provider %q", cfg.Tracker.Provider)
+	}
+}
+
+func resolveCutoverOverride(cliFlag, configValue string) (time.Time, error) {
+	value := cliFlag
+	if value == "" {
+		value = configValue
+	}
+	if value == "" {
+		return time.Time{}, nil
+	}
+	t, err := config.ParseCutoverDate(value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse cutover date %q: %w", value, err)
+	}
+	return t, nil
+}
+
+// Compile-time use of io.Writer to keep the import — exposed in case a
+// future flag/feature needs to fork its progress writer.
+var _ io.Writer = os.Stdout

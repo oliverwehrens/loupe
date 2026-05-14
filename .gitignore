@@ -1,0 +1,10 @@
+/loupe
+/bin/
+/dist/
+.loupe/
+*.out
+*.cov
+*.test
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,45 @@
+version: 2
+
+builds:
+  - main: ./cmd/loupe
+    binary: loupe
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: checksums.txt
+
+brews:
+  - repository:
+      owner: StephanSchmidt
+      name: homebrew-tap
+    homepage: https://github.com/StephanSchmidt/loupe
+    description: TODO
+    license: MIT
+    install: |
+      bin.install "loupe"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

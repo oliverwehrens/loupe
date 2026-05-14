@@ -1,0 +1,34 @@
+org: acme-eng
+
+git_host:
+  provider: bitbucket-cloud
+  base_url: https://api.bitbucket.org/2.0
+  username: stephan@inkmi.com
+  # Bitbucket app password is prompted at every `loupe baseline` invocation.
+
+tracker:
+  provider: jira-cloud
+  site: acme.atlassian.net
+  email: stephan@inkmi.com
+  # Jira API token is prompted at every `loupe baseline` invocation.
+
+teams:
+  - name: platform
+    members: [alice@acme.com, bob@acme.com]
+  - name: product
+    members: [carol@acme.com, dan@acme.com]
+
+ai_adoption:
+  # auto-detect by default; uncomment to override
+  # cutover_date: 2026-03-15
+  detection:
+    co_author_trailers: true
+    pr_labels: [ai-assisted]
+  min_weekly_commits_for_cutover: 0.05
+
+windows:
+  baseline_weeks: 12
+  comparison_weeks: 12
+
+output:
+  path: ./reports

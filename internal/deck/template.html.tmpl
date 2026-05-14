@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ .OrgName }} — AI Impact Report</title>
+<link rel="stylesheet" href="assets/reveal.css">
+<link rel="stylesheet" href="assets/theme/white.css">
+<style>
+  .reveal h1, .reveal h2, .reveal h3 { text-transform: none; }
+  .reveal .big-number {
+    font-size: 4em;
+    font-weight: 700;
+    line-height: 1;
+    margin: 0.1em 0 0.2em 0;
+  }
+  .reveal .big-number-grid {
+    display: flex;
+    justify-content: space-around;
+    align-items: flex-start;
+    gap: 2em;
+    margin: 1.5em 0;
+  }
+  .reveal .big-number-grid > div { text-align: center; max-width: 280px; }
+  .reveal .footnote { font-size: 0.55em; color: #666; margin-top: 1em; }
+  .reveal .caveats { font-size: 0.7em; }
+  .reveal img.chart { max-width: 90%; max-height: 70vh; box-shadow: none; border: none; }
+</style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<section>
+  <h1>AI Impact Report</h1>
+  <h3>{{ .OrgName }}</h3>
+  <p>Week of {{ .ReportDate.Format "January 2, 2006" }}</p>
+  <p class="footnote">Scope: {{ .Scope }} &middot; Window: {{ .WindowStart.Format "Jan 02, 2006" }} – {{ .WindowEnd.Format "Jan 02, 2006" }}</p>
+  <aside class="notes">
+    Loupe baseline report. Local-only — no data left this machine. Skeptic mode: the methodology slide at the end lists what we measured and how.
+  </aside>
+</section>
+
+<section>
+  <h2>Adoption</h2>
+  <div class="big-number-grid">
+    <div>
+      <p class="big-number">{{ .TotalCommits }}</p>
+      <p>commits over {{ len .Weeks }} weeks</p>
+    </div>
+    <div>
+      <p class="big-number">{{ printf "%.1f%%" .AICommitPct }}</p>
+      <p>of commits carry an AI co-author trailer</p>
+    </div>
+    <div>
+      <p class="big-number">{{ .AIAuthorCount }}/{{ .DistinctAuthorCount }}</p>
+      <p>devs with at least one AI-tagged commit</p>
+    </div>
+  </div>
+  <p class="footnote">{{ .CutoverText }}</p>
+  <aside class="notes">
+    Trailer-based detection is conservative: Claude and Aider write Co-Authored-By trailers by default; Cursor and Copilot generally don't. Real adoption among Cursor/Copilot users is likely higher than this chart shows.
+  </aside>
+</section>
+
+<section>
+  <h2>Weekly throughput</h2>
+  <img class="chart" src="charts/throughput.png" alt="Weekly commits, AI-tagged vs human">
+  <aside class="notes">
+    Commits per week, stacked human vs AI-tagged. Merge commits included. A truncated rightmost bar usually reflects a partial week at report time.
+  </aside>
+</section>
+
+<section>
+  <h2>Adoption over time</h2>
+  <img class="chart" src="charts/adoption.png" alt="AI adoption percentage per week">
+  <aside class="notes">
+    Percentage of active devs per week with at least one AI-tagged commit. The shape of this curve matters more than any single point — board-friendly chart.
+  </aside>
+</section>
+
+<section>
+  <h2>Methodology &amp; caveats</h2>
+  <div class="caveats" style="text-align: left;">
+    <h4>How AI signals are detected</h4>
+    <ul>
+      <li><b>High confidence</b> — <code>Co-Authored-By</code> trailer from Claude / Claude Code, Aider, Copilot, Cursor</li>
+      <li><b>Medium</b> — seat-holder + timing patterns (not yet implemented)</li>
+      <li><b>Low</b> — commit-shape heuristics (not used in this report)</li>
+    </ul>
+    <h4>Not in this report yet</h4>
+    <ul>
+      <li>Cycle time (needs Jira tickets + Bitbucket PRs)</li>
+      <li>Defect rate / quality counterweight</li>
+      <li>Per-team breakdown</li>
+    </ul>
+    <p><b>Cutover:</b> {{ .CutoverText }}</p>
+    <p><b>Threshold:</b> a week qualifies as the cutover when AI-tagged commits reach {{ printf "%.0f%%" .CutoverThresholdPct }} of weekly commits.</p>
+  </div>
+  <aside class="notes">
+    ROI is intentionally omitted — the assumption it requires (hours saved per AI-tagged commit) can't be defended in front of a skeptical CFO.
+  </aside>
+</section>
+
+</div>
+</div>
+<script src="assets/reveal.js"></script>
+<script>
+  Reveal.initialize({
+    hash: true,
+    controls: true,
+    progress: true,
+    slideNumber: 'c/t',
+    transition: 'fade'
+  });
+</script>
+</body>
+</html>

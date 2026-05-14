@@ -1,0 +1,175 @@
+package deck
+
+import (
+	"embed"
+	"fmt"
+	"html/template"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/StephanSchmidt/loupe/internal/analyze"
+	"github.com/StephanSchmidt/loupe/internal/config"
+)
+
+//go:embed assets/reveal/reveal.js assets/reveal/reveal.css assets/reveal/theme/white.css
+var revealAssets embed.FS
+
+//go:embed template.html.tmpl
+var deckTemplate string
+
+// DeckData is the template payload for template.html.tmpl. Fields are
+// pre-computed in RenderDeck so the template stays format-only.
+type DeckData struct {
+	OrgName             string
+	Scope               string
+	ReportDate          time.Time
+	WindowStart         time.Time
+	WindowEnd           time.Time
+	TotalCommits        int
+	AICommits           int
+	AICommitPct         float64
+	DistinctAuthorCount int
+	AIAuthorCount       int
+	Weeks               []analyze.WeekStats
+	Cutover             analyze.Cutover
+	CutoverText         string
+	CutoverThresholdPct float64
+}
+
+// RenderDeck writes a self-contained reveal.js deck under deckDir:
+//
+//	deckDir/
+//	  index.html
+//	  assets/reveal.js
+//	  assets/reveal.css
+//	  assets/theme/white.css
+//	  charts/throughput.png
+//	  charts/adoption.png
+//
+// deckDir is created if missing. An existing deckDir is overwritten in place.
+func RenderDeck(
+	deckDir string,
+	cfg *config.Config,
+	weeks []analyze.WeekStats,
+	cutover analyze.Cutover,
+	reportDate time.Time,
+) error {
+	if err := os.MkdirAll(deckDir, 0o750); err != nil {
+		return fmt.Errorf("create deck dir %s: %w", deckDir, err)
+	}
+
+	if err := copyRevealAssets(filepath.Join(deckDir, "assets")); err != nil {
+		return err
+	}
+
+	chartsDir := filepath.Join(deckDir, "charts")
+	if err := RenderThroughputChart(weeks, cutover, filepath.Join(chartsDir, "throughput.png")); err != nil {
+		return err
+	}
+	if err := RenderAdoptionChart(weeks, cutover, filepath.Join(chartsDir, "adoption.png")); err != nil {
+		return err
+	}
+
+	data := buildDeckData(cfg, weeks, cutover, reportDate)
+	tmpl, err := template.New("deck").Parse(deckTemplate)
+	if err != nil {
+		return fmt.Errorf("parse template: %w", err)
+	}
+
+	indexPath := filepath.Join(deckDir, "index.html")
+	f, err := os.Create(indexPath) // #nosec G304 -- indexPath is loupe-constructed under the caller-supplied deck dir
+	if err != nil {
+		return fmt.Errorf("create %s: %w", indexPath, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if err := tmpl.Execute(f, data); err != nil {
+		return fmt.Errorf("render template: %w", err)
+	}
+	return nil
+}
+
+func buildDeckData(
+	cfg *config.Config,
+	weeks []analyze.WeekStats,
+	cutover analyze.Cutover,
+	reportDate time.Time,
+) DeckData {
+	d := DeckData{
+		OrgName:             cfg.Org,
+		Scope:               cfg.Org,
+		ReportDate:          reportDate,
+		Weeks:               weeks,
+		Cutover:             cutover,
+		CutoverThresholdPct: cutover.Threshold * 100,
+	}
+
+	// Over-window distinct-author counts would need raw commit data; for v0 we
+	// take the max of any single week as a conservative proxy — fine for the
+	// headline number and keeps this code path query-free.
+	for _, w := range weeks {
+		d.TotalCommits += w.TotalCommits
+		d.AICommits += w.AICommits
+		if w.DistinctAuthors > d.DistinctAuthorCount {
+			d.DistinctAuthorCount = w.DistinctAuthors
+		}
+		if w.AIAuthors > d.AIAuthorCount {
+			d.AIAuthorCount = w.AIAuthors
+		}
+	}
+
+	if d.TotalCommits > 0 {
+		d.AICommitPct = float64(d.AICommits) / float64(d.TotalCommits) * 100
+	}
+	if len(weeks) > 0 {
+		d.WindowStart = weeks[0].WeekStart
+		d.WindowEnd = weeks[len(weeks)-1].WeekStart.AddDate(0, 0, 6)
+	} else {
+		d.WindowStart = reportDate
+		d.WindowEnd = reportDate
+	}
+
+	switch cutover.Reason {
+	case analyze.CutoverReasonOverride:
+		d.CutoverText = fmt.Sprintf("Set in config to %s", cutover.Date.Format("Jan 2, 2006"))
+	case analyze.CutoverReasonAuto:
+		d.CutoverText = fmt.Sprintf("Auto-detected at %s — first week with ≥%.0f%% AI commits",
+			cutover.Date.Format("Jan 2, 2006"), cutover.Threshold*100)
+	default:
+		d.CutoverText = "No AI cutover detected in this window — adoption trailers may be missing"
+	}
+	return d
+}
+
+// copyRevealAssets walks the embedded reveal.js bundle and writes it under dst.
+// The "assets/reveal" prefix is stripped so dst/reveal.js etc. end up at the
+// expected paths for the template's <link>/<script> tags.
+func copyRevealAssets(dst string) error {
+	const srcPrefix = "assets/reveal"
+	return fs.WalkDir(revealAssets, srcPrefix, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcPrefix, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o750)
+		}
+		data, err := revealAssets.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read embedded %s: %w", path, err)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
+			return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
+		}
+		if err := os.WriteFile(target, data, 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", target, err)
+		}
+		return nil
+	})
+}
