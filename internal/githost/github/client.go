@@ -291,7 +291,12 @@ func (c *Client) ListCommits(ctx context.Context, repo githost.RepoRef, since ti
 // return 200 [] for empty repos, so we don't generalise this check.
 func isEmptyRepoError(err error) bool {
 	var se *apiclient.StatusError
-	return errors.As(err, &se) && se.StatusCode == http.StatusConflict
+	if !errors.As(err, &se) || se == nil {
+		// errors.As guarantees a non-nil target on true; the second check
+		// is for nilaway's flow analysis, which can't model that contract.
+		return false
+	}
+	return se.StatusCode == http.StatusConflict
 }
 
 func commitFromWire(raw wireCommit) githost.Commit {

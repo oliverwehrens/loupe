@@ -107,7 +107,7 @@ func TestIngestGitHost_EndToEnd(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 
-	stats, err := IngestGitHost(context.Background(), s, buildFake(), nil)
+	stats, err := IngestGitHost(context.Background(), s, buildFake(), nil, GitHostFilter{})
 	if err != nil {
 		t.Fatalf("IngestGitHost: %v", err)
 	}
@@ -168,6 +168,40 @@ func TestIngestGitHost_EndToEnd(t *testing.T) {
 	})
 }
 
+func TestIngestGitHost_RepoFilterSkipsOthers(t *testing.T) {
+	s, err := store.Open(store.MemoryPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	stats, err := IngestGitHost(context.Background(), s, buildFake(), nil, GitHostFilter{Repo: "acme/backend"})
+	if err != nil {
+		t.Fatalf("IngestGitHost: %v", err)
+	}
+	// Filter excludes acme/frontend and the whole beta workspace.
+	want := GitHostStats{Workspaces: 1, Repos: 1, Commits: 2, PullRequests: 1}
+	if stats != want {
+		t.Errorf("stats = %+v, want %+v", stats, want)
+	}
+	assertCount(t, s, `SELECT COUNT(*) FROM repos WHERE full_name = 'acme/backend'`, 1)
+	assertCount(t, s, `SELECT COUNT(*) FROM repos WHERE full_name = 'acme/frontend'`, 0)
+	assertCount(t, s, `SELECT COUNT(*) FROM commits WHERE repo_name = 'beta/agent'`, 0)
+}
+
+func TestIngestGitHost_RepoFilterRejectsBadFormat(t *testing.T) {
+	s, err := store.Open(store.MemoryPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	_, err = IngestGitHost(context.Background(), s, buildFake(), nil, GitHostFilter{Repo: "no-slash"})
+	if err == nil || !contains(err.Error(), "workspace/slug") {
+		t.Errorf("expected workspace/slug error, got %v", err)
+	}
+}
+
 func assertCount(t *testing.T, s *store.Store, query string, want int) {
 	t.Helper()
 	var got int
@@ -187,10 +221,10 @@ func TestIngestGitHost_IdempotentReruns(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	fake := buildFake()
-	if _, err := IngestGitHost(context.Background(), s, fake, nil); err != nil {
+	if _, err := IngestGitHost(context.Background(), s, fake, nil, GitHostFilter{}); err != nil {
 		t.Fatalf("first ingest: %v", err)
 	}
-	if _, err := IngestGitHost(context.Background(), s, fake, nil); err != nil {
+	if _, err := IngestGitHost(context.Background(), s, fake, nil, GitHostFilter{}); err != nil {
 		t.Fatalf("second ingest: %v", err)
 	}
 

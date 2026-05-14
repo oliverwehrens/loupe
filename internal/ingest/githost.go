@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/StephanSchmidt/loupe/internal/githost"
@@ -24,23 +25,46 @@ type GitHostStats struct {
 	PullRequests int
 }
 
+// GitHostFilter restricts which workspaces/repos get ingested. The zero
+// value means "ingest everything" (the default baseline behaviour).
+type GitHostFilter struct {
+	// Repo is "workspace/slug" — when set, only this repo is ingested,
+	// every other workspace and repo is skipped before any commit or PR
+	// API call is made.
+	Repo string
+}
+
 // IngestGitHost walks gh's discovery surface (workspaces → repos → commits
 // & PRs) and persists every row into s. Each repo's watermark is advanced
 // at the end of its loop body, so a mid-baseline failure preserves
 // progress for repos already processed.
 //
 // progressOut may be nil; otherwise it receives one line per repo.
-func IngestGitHost(ctx context.Context, s *store.Store, gh githost.GitHost, progressOut io.Writer) (GitHostStats, error) {
+func IngestGitHost(ctx context.Context, s *store.Store, gh githost.GitHost, progressOut io.Writer, filter GitHostFilter) (GitHostStats, error) {
 	var stats GitHostStats
 	provider := gh.Name()
 	now := time.Now().UTC().Unix()
+
+	wantWorkspace := ""
+	if filter.Repo != "" {
+		// "ws/slug" — anything past the first slash is the slug, matched
+		// exactly by FullName() inside the repo loop.
+		i := strings.IndexByte(filter.Repo, '/')
+		if i <= 0 {
+			return stats, fmt.Errorf("invalid --repo filter %q (want workspace/slug)", filter.Repo)
+		}
+		wantWorkspace = filter.Repo[:i]
+	}
 
 	workspaces, err := gh.ListWorkspaces(ctx)
 	if err != nil {
 		return stats, fmt.Errorf("list workspaces: %w", err)
 	}
 	for _, ws := range workspaces {
-		if err := ingestWorkspace(ctx, s.DB(), gh, provider, ws, now, progressOut, &stats); err != nil {
+		if wantWorkspace != "" && ws.Slug != wantWorkspace {
+			continue
+		}
+		if err := ingestWorkspace(ctx, s.DB(), gh, provider, ws, now, progressOut, &stats, filter); err != nil {
 			return stats, err
 		}
 	}
@@ -56,6 +80,7 @@ func ingestWorkspace(
 	now int64,
 	progressOut io.Writer,
 	stats *GitHostStats,
+	filter GitHostFilter,
 ) error {
 	if err := upsertWorkspace(ctx, db, provider, ws, now); err != nil {
 		return err
@@ -67,6 +92,9 @@ func ingestWorkspace(
 		return fmt.Errorf("list repos for %s: %w", ws.Slug, err)
 	}
 	for _, repo := range repos {
+		if filter.Repo != "" && repo.FullName() != filter.Repo {
+			continue
+		}
 		if err := ingestRepo(ctx, db, gh, provider, repo, now, progressOut, stats); err != nil {
 			return err
 		}

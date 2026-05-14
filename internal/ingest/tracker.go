@@ -17,9 +17,18 @@ type TrackerStats struct {
 	Issues   int
 }
 
+// TrackerFilter restricts which projects get ingested. The zero value
+// means "ingest everything" (the default baseline behaviour).
+type TrackerFilter struct {
+	// Project is the tracker project key — when set, only that project's
+	// issues are fetched. For GitHub the key is "owner/repo"; for Jira
+	// it is the project key (e.g. "ENG").
+	Project string
+}
+
 // IngestTracker walks t's projects → issues and persists rows into s.
 // Per-project watermark advances at the end of each project's loop body.
-func IngestTracker(ctx context.Context, s *store.Store, t tracker.Tracker, progressOut io.Writer) (TrackerStats, error) {
+func IngestTracker(ctx context.Context, s *store.Store, t tracker.Tracker, progressOut io.Writer, filter TrackerFilter) (TrackerStats, error) {
 	var stats TrackerStats
 	provider := t.Name()
 	now := time.Now().UTC().Unix()
@@ -30,6 +39,9 @@ func IngestTracker(ctx context.Context, s *store.Store, t tracker.Tracker, progr
 	}
 
 	for _, p := range projects {
+		if filter.Project != "" && p.Key != filter.Project {
+			continue
+		}
 		if err := upsertProject(ctx, s.DB(), provider, p, now); err != nil {
 			return stats, err
 		}

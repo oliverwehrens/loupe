@@ -47,6 +47,14 @@ loupe status      # local sqlite summary — no API calls
 
 `loupe baseline` prompts (echo off) for the Bitbucket app password and Jira API token every invocation. No env vars, no keychain in v0. State is kept locally at `.loupe/state.db`; decks land under `./reports/<timestamp>/index.html`.
 
+To analyse a single repo on a github account with 50+ repos, narrow the scope:
+
+```bash
+loupe baseline --repo StephanSchmidt/loupe
+```
+
+`--repo` filters the git host before any commit/PR API call. When both providers are `github`, the tracker project filter is auto-derived to the same value. Pass `--project KEY` explicitly to scope the tracker side independently (e.g. for a Jira project key while keeping the git host wide open).
+
 Alongside the interactive deck, each run also writes standalone chart exports under `./reports/<timestamp>/charts/`:
 
 - `throughput.png`, `adoption.png` — paste straight into Slack or email

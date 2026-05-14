@@ -64,7 +64,7 @@ func TestIngestTracker_EndToEnd(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 
-	stats, err := IngestTracker(context.Background(), s, buildFakeTracker(), nil)
+	stats, err := IngestTracker(context.Background(), s, buildFakeTracker(), nil, TrackerFilter{})
 	if err != nil {
 		t.Fatalf("IngestTracker: %v", err)
 	}
@@ -101,6 +101,27 @@ func TestIngestTracker_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestIngestTracker_ProjectFilterSkipsOthers(t *testing.T) {
+	s, err := store.Open(store.MemoryPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	stats, err := IngestTracker(context.Background(), s, buildFakeTracker(), nil, TrackerFilter{Project: "ENG"})
+	if err != nil {
+		t.Fatalf("IngestTracker: %v", err)
+	}
+	if stats.Projects != 1 || stats.Issues != 2 {
+		t.Errorf("stats = %+v, want 1 project / 2 issues", stats)
+	}
+	var n int
+	_ = s.DB().QueryRow(`SELECT COUNT(*) FROM tickets WHERE project_key = 'OPS'`).Scan(&n)
+	if n != 0 {
+		t.Errorf("OPS tickets count = %d, want 0", n)
+	}
+}
+
 func TestIngestTracker_Idempotent(t *testing.T) {
 	s, err := store.Open(store.MemoryPath)
 	if err != nil {
@@ -109,10 +130,10 @@ func TestIngestTracker_Idempotent(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	fake := buildFakeTracker()
-	if _, err := IngestTracker(context.Background(), s, fake, nil); err != nil {
+	if _, err := IngestTracker(context.Background(), s, fake, nil, TrackerFilter{}); err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	if _, err := IngestTracker(context.Background(), s, fake, nil); err != nil {
+	if _, err := IngestTracker(context.Background(), s, fake, nil, TrackerFilter{}); err != nil {
 		t.Fatalf("second: %v", err)
 	}
 	var n int

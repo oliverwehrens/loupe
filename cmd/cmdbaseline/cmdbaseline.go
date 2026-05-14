@@ -54,6 +54,8 @@ Tokens are prompted (echo off) every invocation — no env vars in v0.`,
 	cmd.Flags().String("config", defaultConfigPath, "path to loupe.yaml")
 	cmd.Flags().String("cutover-date", "", "override AI-adoption cutover (YYYY-MM-DD)")
 	cmd.Flags().Bool("dry-run", false, "validate config without writing state")
+	cmd.Flags().String("repo", "", "limit to a single repo (e.g. owner/slug); skips every other repo before any commit API call")
+	cmd.Flags().String("project", "", "limit to a single tracker project key (e.g. ENG, or owner/repo for GitHub Issues); defaults to --repo when both providers are github")
 
 	// Hidden test-only flags. Documented surface stays "every invocation prompts".
 	cmd.Flags().String(flagGitHostToken, "", "")
@@ -74,6 +76,8 @@ type baselineOpts struct {
 	trackerToken   string
 	gitHostBaseURL string
 	trackerBaseURL string
+	repoFilter     string
+	projectFilter  string
 	out            io.Writer
 }
 
@@ -104,6 +108,8 @@ func loadBaselineOpts(cmd *cobra.Command) (*baselineOpts, bool, error) {
 	configPath, _ := cmd.Flags().GetString("config")
 	cutoverFlag, _ := cmd.Flags().GetString("cutover-date")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	repoFilter, _ := cmd.Flags().GetString("repo")
+	projectFilter, _ := cmd.Flags().GetString("project")
 	gitHostToken, _ := cmd.Flags().GetString(flagGitHostToken)
 	trackerToken, _ := cmd.Flags().GetString(flagTrackerToken)
 	gitHostBaseURL, _ := cmd.Flags().GetString(flagGitHostBaseURL)
@@ -127,10 +133,21 @@ func loadBaselineOpts(cmd *cobra.Command) (*baselineOpts, bool, error) {
 			return nil, false, err
 		}
 	}
+	// Both-github convenience: when the git host and tracker are both
+	// github and only --repo is supplied, treat it as the tracker project
+	// too. Project keys for GitHub Issues are "owner/repo", matching the
+	// repo filter's format exactly.
+	if projectFilter == "" && repoFilter != "" &&
+		cfg.GitHost.Provider == config.ProviderGitHub &&
+		cfg.Tracker.Provider == config.ProviderGitHub {
+		projectFilter = repoFilter
+	}
+
 	return &baselineOpts{
 		cfg: cfg, override: override,
 		gitHostToken: gitHostToken, trackerToken: trackerToken,
 		gitHostBaseURL: gitHostBaseURL, trackerBaseURL: trackerBaseURL,
+		repoFilter: repoFilter, projectFilter: projectFilter,
 		out: cmd.OutOrStdout(),
 	}, dryRun, nil
 }
@@ -167,7 +184,7 @@ func runPipeline(ctx context.Context, opts *baselineOpts, gh githost.GitHost, tr
 	}
 	defer func() { _ = s.Close() }()
 
-	if err := runIngest(ctx, s, gh, trk, opts.out); err != nil {
+	if err := runIngest(ctx, opts, s, gh, trk); err != nil {
 		return err
 	}
 	weeks, cutover, err := runAnalyze(ctx, s, opts)
@@ -177,19 +194,23 @@ func runPipeline(ctx context.Context, opts *baselineOpts, gh githost.GitHost, tr
 	return renderAndAnnounce(opts, weeks, cutover, s)
 }
 
-func runIngest(ctx context.Context, s *store.Store, gh githost.GitHost, trk tracker.Tracker, out io.Writer) error {
+func runIngest(ctx context.Context, opts *baselineOpts, s *store.Store, gh githost.GitHost, trk tracker.Tracker) error {
+	out := opts.out
 	_, _ = fmt.Fprintf(out, "Indexing git host (%s)...\n", gh.Name())
-	ghStats, err := ingest.IngestGitHost(ctx, s, gh, out)
+	ghStats, err := ingest.IngestGitHost(ctx, s, gh, out, ingest.GitHostFilter{Repo: opts.repoFilter})
 	if err != nil {
 		return fmt.Errorf("ingest git host: %w", err)
 	}
 	_, _ = fmt.Fprintf(out, "  %d workspaces, %d repos, %d commits, %d PRs\n",
 		ghStats.Workspaces, ghStats.Repos, ghStats.Commits, ghStats.PullRequests)
 	if ghStats.Commits == 0 {
-		return fmt.Errorf("no commits indexed — is the Bitbucket credential correct?")
+		if opts.repoFilter != "" {
+			return fmt.Errorf("no commits indexed for %q — check the --repo value matches a repo the credential can see", opts.repoFilter)
+		}
+		return fmt.Errorf("no commits indexed — is the credential correct?")
 	}
 	_, _ = fmt.Fprintf(out, "Indexing tracker (%s)...\n", trk.Name())
-	tStats, err := ingest.IngestTracker(ctx, s, trk, out)
+	tStats, err := ingest.IngestTracker(ctx, s, trk, out, ingest.TrackerFilter{Project: opts.projectFilter})
 	if err != nil {
 		return fmt.Errorf("ingest tracker: %w", err)
 	}
