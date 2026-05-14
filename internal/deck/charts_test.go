@@ -1,9 +1,8 @@
 package deck
 
 import (
-	"bytes"
-	"os"
-	"path/filepath"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,55 +33,112 @@ func sampleCutover(weeks []analyze.WeekStats) analyze.Cutover {
 	}
 }
 
-// pngMagic is the 8-byte PNG signature.
-var pngMagic = []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
-
-func assertPNG(t *testing.T, path string) {
+// decodeOption parses the option blob back into a generic map for shape
+// assertions. Tests inspect a few load-bearing fields rather than the full
+// ECharts schema, which is too broad and changes upstream.
+func decodeOption(t *testing.T, blob string) map[string]any {
 	t.Helper()
-	data, err := os.ReadFile(path)
+	var out map[string]any
+	if err := json.Unmarshal([]byte(blob), &out); err != nil {
+		t.Fatalf("unmarshal option: %v\nblob: %s", err, blob)
+	}
+	return out
+}
+
+func TestBuildChartPayload_ThroughputShape(t *testing.T) {
+	weeks := sampleWeeks()
+	cutover := sampleCutover(weeks)
+
+	got, err := BuildChartPayload(weeks, cutover)
 	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
+		t.Fatalf("BuildChartPayload: %v", err)
 	}
-	if len(data) < 1000 {
-		t.Errorf("%s suspiciously small (%d bytes)", path, len(data))
+
+	opt := decodeOption(t, string(got.ThroughputJSON))
+
+	series, _ := opt["series"].([]any)
+	if len(series) != 2 {
+		t.Fatalf("throughput series len = %d, want 2", len(series))
 	}
-	if !bytes.HasPrefix(data, pngMagic) {
-		t.Errorf("%s is not a PNG: header = %x", path, data[:8])
+
+	human, _ := series[0].(map[string]any)
+	if human["name"] != "Human" || human["stack"] != "total" {
+		t.Errorf("human series misconfigured: %+v", human)
+	}
+	humanData, _ := human["data"].([]any)
+	if len(humanData) != len(weeks) {
+		t.Errorf("human series data len = %d, want %d", len(humanData), len(weeks))
+	}
+
+	ai, _ := series[1].(map[string]any)
+	if ai["name"] != "AI-tagged" || ai["stack"] != "total" {
+		t.Errorf("ai series misconfigured: %+v", ai)
+	}
+	if _, hasMark := ai["markLine"]; !hasMark {
+		t.Errorf("expected markLine on AI series when cutover detected; got: %+v", ai)
+	}
+
+	title, _ := opt["title"].(map[string]any)
+	if title["text"] != "Weekly commits" {
+		t.Errorf("title.text = %v, want %q", title["text"], "Weekly commits")
+	}
+	subtext, _ := title["subtext"].(string)
+	if !strings.Contains(subtext, cutover.Date.Format("Jan 2, 2006")) {
+		t.Errorf("title.subtext = %q, want it to reference cutover date", subtext)
 	}
 }
 
-func TestRenderThroughputChart(t *testing.T) {
+func TestBuildChartPayload_AdoptionShape(t *testing.T) {
 	weeks := sampleWeeks()
 	cutover := sampleCutover(weeks)
-	out := filepath.Join(t.TempDir(), "throughput.png")
-	if err := RenderThroughputChart(weeks, cutover, out); err != nil {
-		t.Fatalf("RenderThroughputChart: %v", err)
+
+	got, err := BuildChartPayload(weeks, cutover)
+	if err != nil {
+		t.Fatalf("BuildChartPayload: %v", err)
 	}
-	assertPNG(t, out)
+
+	opt := decodeOption(t, string(got.AdoptionJSON))
+
+	series, _ := opt["series"].([]any)
+	if len(series) != 1 {
+		t.Fatalf("adoption series len = %d, want 1", len(series))
+	}
+	s0, _ := series[0].(map[string]any)
+	if s0["type"] != "line" {
+		t.Errorf("adoption series type = %v, want line", s0["type"])
+	}
+	if _, hasMark := s0["markLine"]; !hasMark {
+		t.Errorf("expected markLine on adoption series when cutover detected; got: %+v", s0)
+	}
+
+	y, _ := opt["yAxis"].(map[string]any)
+	if y["max"].(float64) != 100 {
+		t.Errorf("yAxis.max = %v, want 100", y["max"])
+	}
 }
 
-func TestRenderAdoptionChart(t *testing.T) {
+func TestBuildChartPayload_NoCutoverOmitsMarkLine(t *testing.T) {
 	weeks := sampleWeeks()
-	cutover := sampleCutover(weeks)
-	out := filepath.Join(t.TempDir(), "adoption.png")
-	if err := RenderAdoptionChart(weeks, cutover, out); err != nil {
-		t.Fatalf("RenderAdoptionChart: %v", err)
+	got, err := BuildChartPayload(weeks, analyze.Cutover{Detected: false})
+	if err != nil {
+		t.Fatalf("BuildChartPayload: %v", err)
 	}
-	assertPNG(t, out)
+	opt := decodeOption(t, string(got.ThroughputJSON))
+	series, _ := opt["series"].([]any)
+	for i, s := range series {
+		sm, _ := s.(map[string]any)
+		if _, hasMark := sm["markLine"]; hasMark {
+			t.Errorf("series[%d] has markLine but cutover not detected", i)
+		}
+	}
+	title, _ := opt["title"].(map[string]any)
+	if _, hasSubtext := title["subtext"]; hasSubtext {
+		t.Errorf("title.subtext should be absent when cutover not detected; got: %+v", title)
+	}
 }
 
-func TestRenderThroughputChart_NoData(t *testing.T) {
-	out := filepath.Join(t.TempDir(), "throughput.png")
-	if err := RenderThroughputChart(nil, analyze.Cutover{}, out); err == nil {
+func TestBuildChartPayload_NoData(t *testing.T) {
+	if _, err := BuildChartPayload(nil, analyze.Cutover{}); err == nil {
 		t.Errorf("expected error for empty weeks, got nil")
 	}
-}
-
-func TestRenderThroughputChart_NoCutover(t *testing.T) {
-	weeks := sampleWeeks()
-	out := filepath.Join(t.TempDir(), "throughput.png")
-	if err := RenderThroughputChart(weeks, analyze.Cutover{Detected: false}, out); err != nil {
-		t.Fatalf("RenderThroughputChart without cutover: %v", err)
-	}
-	assertPNG(t, out)
 }

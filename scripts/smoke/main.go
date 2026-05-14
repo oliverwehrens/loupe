@@ -154,8 +154,7 @@ func assertDeck(workDir string) error {
 	for _, rel := range []string{
 		"index.html",
 		"assets/reveal.js",
-		"charts/throughput.png",
-		"charts/adoption.png",
+		"assets/echarts.min.js",
 	} {
 		info, err := os.Stat(filepath.Join(runDir, rel))
 		if err != nil {

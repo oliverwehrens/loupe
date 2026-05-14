@@ -30,8 +30,7 @@ func TestRenderDeck_ProducesAllArtifacts(t *testing.T) {
 		"assets/reveal.js",
 		"assets/reveal.css",
 		"assets/theme/white.css",
-		"charts/throughput.png",
-		"charts/adoption.png",
+		"assets/echarts.min.js",
 	}
 	for _, f := range wantFiles {
 		p := filepath.Join(dir, f)
@@ -46,7 +45,7 @@ func TestRenderDeck_ProducesAllArtifacts(t *testing.T) {
 	}
 
 	// Smoke-test the rendered HTML: verifies template fields were substituted
-	// and the references point at the assets we just produced.
+	// and the page wires up ECharts on the expected containers.
 	html, err := os.ReadFile(filepath.Join(dir, "index.html"))
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
@@ -55,9 +54,10 @@ func TestRenderDeck_ProducesAllArtifacts(t *testing.T) {
 	for _, want := range []string{
 		"acme-eng",
 		"AI Impact Report",
-		"charts/throughput.png",
-		"charts/adoption.png",
-		"assets/reveal.js",
+		`id="throughput-chart"`,
+		`id="adoption-chart"`,
+		"assets/echarts.min.js",
+		"echarts.init",
 		"Co-Authored-By",
 		"Auto-detected",
 	} {

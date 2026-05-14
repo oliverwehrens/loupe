@@ -13,7 +13,7 @@ import (
 	"github.com/StephanSchmidt/loupe/internal/config"
 )
 
-//go:embed assets/reveal/reveal.js assets/reveal/reveal.css assets/reveal/theme/white.css
+//go:embed assets/reveal/reveal.js assets/reveal/reveal.css assets/reveal/theme/white.css assets/echarts/echarts.min.js
 var revealAssets embed.FS
 
 //go:embed template.html.tmpl
@@ -36,6 +36,7 @@ type DeckData struct {
 	Cutover             analyze.Cutover
 	CutoverText         string
 	CutoverThresholdPct float64
+	Charts              ChartPayload
 }
 
 // RenderDeck writes a self-contained reveal.js deck under deckDir:
@@ -45,8 +46,10 @@ type DeckData struct {
 //	  assets/reveal.js
 //	  assets/reveal.css
 //	  assets/theme/white.css
-//	  charts/throughput.png
-//	  charts/adoption.png
+//	  assets/echarts.min.js
+//
+// Charts are rendered client-side by Apache ECharts; the Go side only
+// emits JSON option payloads embedded in the index.html.
 //
 // deckDir is created if missing. An existing deckDir is overwritten in place.
 func RenderDeck(
@@ -60,19 +63,17 @@ func RenderDeck(
 		return fmt.Errorf("create deck dir %s: %w", deckDir, err)
 	}
 
-	if err := copyRevealAssets(filepath.Join(deckDir, "assets")); err != nil {
+	if err := copyEmbeddedAssets(filepath.Join(deckDir, "assets")); err != nil {
 		return err
 	}
 
-	chartsDir := filepath.Join(deckDir, "charts")
-	if err := RenderThroughputChart(weeks, cutover, filepath.Join(chartsDir, "throughput.png")); err != nil {
-		return err
-	}
-	if err := RenderAdoptionChart(weeks, cutover, filepath.Join(chartsDir, "adoption.png")); err != nil {
-		return err
+	charts, err := BuildChartPayload(weeks, cutover)
+	if err != nil {
+		return fmt.Errorf("build chart payload: %w", err)
 	}
 
 	data := buildDeckData(cfg, weeks, cutover, reportDate)
+	data.Charts = charts
 	tmpl, err := template.New("deck").Parse(deckTemplate)
 	if err != nil {
 		return fmt.Errorf("parse template: %w", err)
@@ -143,11 +144,21 @@ func buildDeckData(
 	return d
 }
 
-// copyRevealAssets walks the embedded reveal.js bundle and writes it under dst.
-// The "assets/reveal" prefix is stripped so dst/reveal.js etc. end up at the
-// expected paths for the template's <link>/<script> tags.
-func copyRevealAssets(dst string) error {
-	const srcPrefix = "assets/reveal"
+// copyEmbeddedAssets walks each embedded asset subtree (reveal.js,
+// echarts.js) and writes its files under dst. The subtree-level prefix is
+// stripped so e.g. assets/reveal/reveal.js → dst/reveal.js and
+// assets/echarts/echarts.min.js → dst/echarts.min.js. That keeps the HTML
+// template's relative-path references flat.
+func copyEmbeddedAssets(dst string) error {
+	for _, srcPrefix := range []string{"assets/reveal", "assets/echarts"} {
+		if err := copyEmbeddedSubtree(srcPrefix, dst); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyEmbeddedSubtree(srcPrefix, dst string) error {
 	return fs.WalkDir(revealAssets, srcPrefix, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err

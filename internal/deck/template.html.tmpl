@@ -23,7 +23,11 @@
   .reveal .big-number-grid > div { text-align: center; max-width: 280px; }
   .reveal .footnote { font-size: 0.55em; color: #666; margin-top: 1em; }
   .reveal .caveats { font-size: 0.7em; }
-  .reveal img.chart { max-width: 90%; max-height: 70vh; box-shadow: none; border: none; }
+  .reveal .chart {
+    width: 90%;
+    height: 70vh;
+    margin: 0 auto;
+  }
 </style>
 </head>
 <body>
@@ -62,17 +66,17 @@
   </aside>
 </section>
 
-<section>
+<section data-chart="throughput">
   <h2>Weekly throughput</h2>
-  <img class="chart" src="charts/throughput.png" alt="Weekly commits, AI-tagged vs human">
+  <div id="throughput-chart" class="chart"></div>
   <aside class="notes">
     Commits per week, stacked human vs AI-tagged. Merge commits included. A truncated rightmost bar usually reflects a partial week at report time.
   </aside>
 </section>
 
-<section>
+<section data-chart="adoption">
   <h2>Adoption over time</h2>
-  <img class="chart" src="charts/adoption.png" alt="AI adoption percentage per week">
+  <div id="adoption-chart" class="chart"></div>
   <aside class="notes">
     Percentage of active devs per week with at least one AI-tagged commit. The shape of this curve matters more than any single point — board-friendly chart.
   </aside>
@@ -104,13 +108,35 @@
 </div>
 </div>
 <script src="assets/reveal.js"></script>
+<script src="assets/echarts.min.js"></script>
 <script>
+  // Option payloads emitted by internal/deck/charts.go. They are JSON
+  // object literals — html/template's contextual escaper marks them as
+  // template.JS so they embed verbatim here.
+  const throughputOption = {{ .Charts.ThroughputJSON }};
+  const adoptionOption = {{ .Charts.AdoptionJSON }};
+
+  // Initialise reveal first. reveal hides slides via display:none, so
+  // ECharts measures 0x0 on hidden containers — we re-size each chart on
+  // every slidechanged event so it lays out correctly when its slide
+  // becomes visible.
   Reveal.initialize({
     hash: true,
     controls: true,
     progress: true,
     slideNumber: 'c/t',
     transition: 'fade'
+  }).then(function () {
+    const throughput = echarts.init(document.getElementById('throughput-chart'));
+    throughput.setOption(throughputOption);
+    const adoption = echarts.init(document.getElementById('adoption-chart'));
+    adoption.setOption(adoptionOption);
+
+    function resizeAll() { throughput.resize(); adoption.resize(); }
+    Reveal.on('slidechanged', resizeAll);
+    window.addEventListener('resize', resizeAll);
+    // Initial sizing for whichever slide is current.
+    setTimeout(resizeAll, 0);
   });
 </script>
 </body>
