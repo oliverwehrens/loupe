@@ -2,35 +2,165 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="dark">
 <title>{{ .OrgName }} — AI Impact Report</title>
 <link rel="stylesheet" href="assets/reveal.css">
-<link rel="stylesheet" href="assets/theme/white.css">
 <style>
-  .reveal h1, .reveal h2, .reveal h3 { text-transform: none; }
-  .reveal .big-number {
-    font-size: 4em;
-    font-weight: 700;
-    line-height: 1;
-    margin: 0.1em 0 0.2em 0;
+  :root {
+    --bg: #0b0f17;
+    --bg-elev: #11172a;
+    --fg: #e5e7eb;
+    --fg-muted: #9ca3af;
+    --fg-dim: #6b7280;
+    --accent: #f59e0b;
+    --accent-2: #3b82f6;
+    --border: #1f2937;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
+  /* reveal.js adds class="reveal-viewport" to <body> at init time, so a
+     bare `body { background: ... }` rule loses the specificity battle
+     against reveal.css's `.reveal-viewport { background: white }`.
+     Target the same class to win. */
+  html { background: var(--bg); }
+  body, .reveal-viewport { background: var(--bg); margin: 0; }
+  .reveal {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 32px;
+    font-weight: 400;
+  }
+  .reveal .slides { text-align: left; }
+  .reveal h1, .reveal h2, .reveal h3, .reveal h4 {
+    font-family: var(--font-sans);
+    color: var(--fg);
+    text-transform: none;
+    letter-spacing: -0.01em;
+    font-weight: 700;
+    margin: 0 0 0.4em;
+    line-height: 1.15;
+  }
+  .reveal h1 { font-size: 2.6em; }
+  .reveal h2 { font-size: 1.6em; }
+  .reveal h3 { font-size: 1.1em; color: var(--fg-muted); font-weight: 500; }
+  .reveal h4 { font-size: 0.9em; margin: 0.7em 0 0.25em; }
+  .reveal p { margin: 0.4em 0; line-height: 1.4; }
+  .reveal a { color: var(--accent-2); }
+  .reveal code {
+    background: var(--bg-elev);
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--accent);
+    font-size: 0.85em;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+  .reveal ul { line-height: 1.5; margin: 0.2em 0 0.4em; padding-left: 1.2em; }
+  .reveal li + li { margin-top: 0.25em; }
+  .reveal b, .reveal strong { font-weight: 600; }
+  .reveal .controls { color: var(--fg-muted); }
+  .reveal .progress {
+    color: var(--accent);
+    background: var(--border);
+    height: 3px;
+  }
+  .reveal .slide-number {
+    background: transparent;
+    color: var(--fg-dim);
+    font-size: 13px;
+  }
+
+  /* Generic helpers */
+  .reveal .eyebrow {
+    font-size: 0.65em;
+    color: var(--fg-muted);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin: 0;
+  }
+  .reveal .accent { color: var(--accent); }
+  .reveal .muted { color: var(--fg-muted); }
+  .reveal .footnote {
+    font-size: 0.55em;
+    color: var(--fg-dim);
+    margin-top: 0.8em;
+  }
+
+  /* Title slide — centered hero */
+  .reveal .title-slide {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    height: 100%;
+    min-height: 600px;
+  }
+  .reveal .title-slide .eyebrow { margin-bottom: 1.2em; }
+  .reveal .title-slide h1 { color: var(--accent); margin: 0; font-size: 3em; }
+  .reveal .title-slide .date {
+    font-size: 1em;
+    color: var(--fg-muted);
+    margin: 0.8em 0 0.4em;
+  }
+  .reveal .title-slide .footnote { margin-top: 1em; font-size: 0.5em; }
+
+  /* Big-number grid (adoption slide) */
   .reveal .big-number-grid {
     display: flex;
-    justify-content: space-around;
-    align-items: flex-start;
-    gap: 2em;
-    margin: 1.5em 0;
+    justify-content: stretch;
+    gap: 18px;
+    margin: 0.8em 0 0;
   }
-  .reveal .big-number-grid > div { text-align: center; max-width: 280px; }
-  .reveal .footnote { font-size: 0.55em; color: #666; margin-top: 1em; }
-  .reveal .caveats { font-size: 0.7em; }
-  /* Fixed dimensions in reveal's logical-slide coords (default 960x700);
-     reveal scales the whole slide via transform, so percentages or vh
-     here would fight with the scale and ECharts would measure wrong. */
+  .reveal .big-number-grid > div {
+    flex: 1;
+    text-align: center;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.9em 0.7em;
+  }
+  .reveal .big-number {
+    font-size: 2.4em;
+    font-weight: 700;
+    line-height: 1;
+    margin: 0 0 0.2em;
+    color: var(--fg);
+    letter-spacing: -0.02em;
+  }
+  .reveal .big-number.accent { color: var(--accent); }
+  .reveal .big-number-grid p:not(.big-number) {
+    color: var(--fg-muted);
+    font-size: 0.5em;
+    line-height: 1.35;
+    margin: 0;
+  }
+
+  /* Charts. Fixed pixel dimensions in reveal's logical-slide coords
+     (default 960x700) — reveal scales the slide via transform, so
+     percentages / vh would fight that scale and ECharts would mis-measure. */
   .reveal .chart {
     width: 880px;
-    height: 480px;
-    margin: 20px auto 0;
+    height: 440px;
+    margin: 14px auto 0;
   }
+
+  /* Methodology / caveats — denser body type */
+  .reveal .caveats {
+    font-size: 0.7em;
+    line-height: 1.55;
+    color: var(--fg);
+  }
+  .reveal .caveats h4 {
+    color: var(--accent);
+    font-size: 0.85em;
+    margin: 0.4em 0 0.2em;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+  }
+  .reveal .caveats ul { margin: 0.2em 0 0.6em; }
+  .reveal .caveats p { margin: 0.4em 0; }
 </style>
 </head>
 <body>
@@ -38,12 +168,14 @@
 <div class="slides">
 
 <section>
-  <h1>AI Impact Report</h1>
-  <h3>{{ .OrgName }}</h3>
-  <p>Week of {{ .ReportDate.Format "January 2, 2006" }}</p>
-  <p class="footnote">Scope: {{ .Scope }} &middot; Window: {{ .WindowStart.Format "Jan 02, 2006" }} – {{ .WindowEnd.Format "Jan 02, 2006" }}</p>
+  <div class="title-slide">
+    <p class="eyebrow">AI Impact Report</p>
+    <h1>{{ .OrgName }}</h1>
+    <p class="date">Week of {{ .ReportDate.Format "January 2, 2006" }}</p>
+    <p class="footnote">Window: {{ .WindowStart.Format "Jan 02, 2006" }} – {{ .WindowEnd.Format "Jan 02, 2006" }}</p>
+  </div>
   <aside class="notes">
-    Loupe baseline report. Local-only — no data left this machine. Skeptic mode: the methodology slide at the end lists what we measured and how.
+    Loupe baseline report. Local-only — no data left this machine. Skeptic mode: the methodology slide lists what we measured and how.
   </aside>
 </section>
 
@@ -55,7 +187,7 @@
       <p>commits over {{ len .Weeks }} weeks</p>
     </div>
     <div>
-      <p class="big-number">{{ printf "%.1f%%" .AICommitPct }}</p>
+      <p class="big-number accent">{{ printf "%.1f%%" .AICommitPct }}</p>
       <p>of commits carry an AI co-author trailer</p>
     </div>
     <div>
@@ -65,7 +197,7 @@
   </div>
   <p class="footnote">{{ .CutoverText }}</p>
   <aside class="notes">
-    Trailer-based detection is conservative: Claude and Aider write Co-Authored-By trailers by default; Cursor and Copilot generally don't. Real adoption among Cursor/Copilot users is likely higher than this chart shows.
+    Trailer-based detection is conservative: Claude and Aider write Co-Authored-By trailers by default; Cursor and Copilot generally don't. Real adoption among Cursor/Copilot users is likely higher.
   </aside>
 </section>
 
@@ -73,7 +205,7 @@
   <h2>Weekly throughput</h2>
   <div id="throughput-chart" class="chart"></div>
   <aside class="notes">
-    Commits per week, stacked human vs AI-tagged. Merge commits included. A truncated rightmost bar usually reflects a partial week at report time.
+    Commits per week, stacked human vs AI-tagged. Merge commits included. A truncated rightmost bar usually reflects a partial week.
   </aside>
 </section>
 
@@ -81,30 +213,40 @@
   <h2>Adoption over time</h2>
   <div id="adoption-chart" class="chart"></div>
   <aside class="notes">
-    Percentage of active devs per week with at least one AI-tagged commit. The shape of this curve matters more than any single point — board-friendly chart.
+    Percentage of active devs per week with at least one AI-tagged commit. The shape of the curve matters more than any single point.
   </aside>
 </section>
 
 <section>
-  <h2>Methodology &amp; caveats</h2>
-  <div class="caveats" style="text-align: left;">
+  <h2>Methodology</h2>
+  <div class="caveats">
     <h4>How AI signals are detected</h4>
     <ul>
       <li><b>High confidence</b> — <code>Co-Authored-By</code> trailer from Claude / Claude Code, Aider, Copilot, Cursor</li>
       <li><b>Medium</b> — seat-holder + timing patterns (not yet implemented)</li>
       <li><b>Low</b> — commit-shape heuristics (not used in this report)</li>
     </ul>
+    <p><b>Cutover:</b> {{ .CutoverText }}</p>
+  </div>
+  <aside class="notes">
+    Trailer detection is the only signal in v0. PR-label detection is configured but not yet wired in.
+  </aside>
+</section>
+
+<section>
+  <h2>Caveats</h2>
+  <div class="caveats">
     <h4>Not in this report yet</h4>
     <ul>
       <li>Cycle time (needs Jira tickets + Bitbucket PRs)</li>
       <li>Defect rate / quality counterweight</li>
       <li>Per-team breakdown</li>
     </ul>
-    <p><b>Cutover:</b> {{ .CutoverText }}</p>
-    <p><b>Threshold:</b> a week qualifies as the cutover when AI-tagged commits reach {{ printf "%.0f%%" .CutoverThresholdPct }} of weekly commits.</p>
+    <p>Cutover threshold: a week qualifies when AI-tagged commits reach <span class="accent">{{ printf "%.0f%%" .CutoverThresholdPct }}</span> of weekly commits.</p>
+    <p class="muted">ROI is intentionally omitted — the assumption it requires (hours saved per AI-tagged commit) can't be defended in front of a skeptical CFO.</p>
   </div>
   <aside class="notes">
-    ROI is intentionally omitted — the assumption it requires (hours saved per AI-tagged commit) can't be defended in front of a skeptical CFO.
+    The honest-measurement pitch. Skeptic-friendly slide.
   </aside>
 </section>
 
@@ -113,18 +255,16 @@
 <script src="assets/reveal.js"></script>
 <script src="assets/echarts.min.js"></script>
 <script>
-  // Option payloads emitted by internal/deck/charts.go. They are JSON
-  // object literals — html/template's contextual escaper marks them as
-  // template.JS so they embed verbatim here.
+  // ECharts option payloads built by internal/deck/charts.go and embedded
+  // verbatim via template.JS — JSON object literals are valid JS.
   const throughputOption = {{ .Charts.ThroughputJSON }};
   const adoptionOption = {{ .Charts.AdoptionJSON }};
 
   // Reveal hides non-current slides with display:none. Initialising an
   // ECharts instance on a hidden container locks it to 0×0 and resize()
-  // doesn't always recover; instead we lazy-init each chart the first
-  // time its slide becomes visible, by which point the container has
-  // real pixel dimensions. <section data-chart="..."> is the
-  // discriminator; the script doesn't hard-code chart IDs.
+  // doesn't always recover; instead lazy-init each chart the first time
+  // its slide becomes visible. <section data-chart="..."> is the
+  // discriminator so the script doesn't hard-code chart IDs.
   const chartOptions = {
     throughput: throughputOption,
     adoption: adoptionOption,
@@ -139,7 +279,7 @@
     if (!div) return;
     let instance = chartInstances[kind];
     if (!instance) {
-      instance = echarts.init(div);
+      instance = echarts.init(div, null, { renderer: 'canvas' });
       instance.setOption(chartOptions[kind]);
       chartInstances[kind] = instance;
     }
@@ -151,11 +291,12 @@
     controls: true,
     progress: true,
     slideNumber: 'c/t',
-    transition: 'fade'
+    transition: 'fade',
+    backgroundTransition: 'none'
   }).then(function () {
     Reveal.on('slidechanged', function (e) { showChartFor(e.currentSlide); });
-    // If the deck is opened on a chart slide (e.g. via #/3), the first
-    // slidechanged event won't fire — handle the initial slide explicitly.
+    // Handle the case where the deck loads directly on a chart slide
+    // (e.g. via #/3) — the slidechanged event won't fire for the initial slide.
     showChartFor(Reveal.getCurrentSlide());
     window.addEventListener('resize', function () {
       for (const k in chartInstances) chartInstances[k].resize();

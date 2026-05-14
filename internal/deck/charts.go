@@ -17,6 +17,21 @@ type ChartPayload struct {
 	AdoptionJSON   template.JS
 }
 
+// Dark-theme palette — kept in sync with template.html.tmpl's CSS vars.
+// Centralised here so chart styling matches the slide chrome.
+const (
+	chartBG        = "transparent"
+	chartFG        = "#e5e7eb"
+	chartMuted     = "#9ca3af"
+	chartGridLine  = "#1f2937"
+	chartAxisLine  = "#374151"
+	chartTooltipBG = "#11172a"
+	chartAccent    = "#f59e0b" // amber — AI-tagged + cutover marker
+	chartAccent2   = "#3b82f6" // blue   — human commits
+	chartDeckBG    = "#0b0f17" // slide background, used as label foreground on accent pill
+	chartFontStack = "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif"
+)
+
 // BuildChartPayload prepares the ECharts option payloads for the deck. The
 // rendered template hands these to echarts.init().setOption() in the
 // browser. The Go side does no PNG rasterisation.
@@ -37,128 +52,209 @@ func BuildChartPayload(weeks []analyze.WeekStats, cutover analyze.Cutover) (Char
 	// option map (only numbers, ECharts keywords, and time-formatted
 	// strings), so the template.JS conversion is safe here.
 	return ChartPayload{
-		ThroughputJSON: template.JS(thru), // #nosec G203 -- JSON-encoded payload, see comment above
+		ThroughputJSON: template.JS(thru),  // #nosec G203 -- JSON-encoded payload, see comment above
 		AdoptionJSON:   template.JS(adopt), // #nosec G203 -- JSON-encoded payload, see comment above
 	}, nil
 }
 
 func marshalOption(opt map[string]any) ([]byte, error) {
-	// json.Marshal escapes <, >, & by default, which keeps embedded strings
-	// from breaking out of the surrounding <script> block.
 	return json.Marshal(opt)
 }
 
-// buildThroughputOption produces the ECharts option for the stacked weekly
-// commit bar chart (human vs AI-tagged). When the cutover is detected the
-// chart carries a vertical markLine at the cutover week.
+// buildThroughputOption produces the ECharts option for the stacked
+// weekly commit bar chart (human vs AI-tagged). When the cutover is
+// detected an amber vertical markLine is placed at the cutover week.
 func buildThroughputOption(weeks []analyze.WeekStats, cutover analyze.Cutover) map[string]any {
-	labels := make([]string, len(weeks))
+	labels, cutoverIdx := axisLabelsAndCutover(weeks, cutover)
 	human := make([]int, len(weeks))
 	ai := make([]int, len(weeks))
-	cutoverIdx := -1
 	for i, w := range weeks {
-		labels[i] = w.WeekStart.Format("Jan 02")
 		human[i] = w.TotalCommits - w.AICommits
 		ai[i] = w.AICommits
-		if cutover.Detected && w.WeekStart.Equal(cutover.Date) {
-			cutoverIdx = i
-		}
 	}
 
 	humanSeries := map[string]any{
 		"name": "Human", "type": "bar", "stack": "total", "data": human,
+		"itemStyle": map[string]any{"borderRadius": []int{0, 0, 0, 0}},
 	}
 	aiSeries := map[string]any{
 		"name": "AI-tagged", "type": "bar", "stack": "total", "data": ai,
+		"itemStyle": map[string]any{"borderRadius": []int{3, 3, 0, 0}},
 	}
 	if cutoverIdx >= 0 {
 		aiSeries["markLine"] = cutoverMarkLine(cutoverIdx)
 	}
 
-	return map[string]any{
-		"title":   titleWithCutover("Weekly commits", cutover),
-		"tooltip": map[string]any{"trigger": "axis", "axisPointer": map[string]any{"type": "shadow"}},
-		"legend":  map[string]any{"data": []string{"Human", "AI-tagged"}},
-		"grid":    map[string]any{"left": 56, "right": 24, "top": 80, "bottom": 64},
-		"xAxis": map[string]any{
-			"type":      "category",
-			"data":      labels,
-			"axisLabel": map[string]any{"rotate": 45, "interval": 0},
-		},
-		"yAxis":  map[string]any{"type": "value"},
-		"series": []map[string]any{humanSeries, aiSeries},
-	}
+	opt := darkChartBase("Weekly commits", cutover)
+	opt["color"] = []string{chartAccent2, chartAccent}
+	opt["legend"] = darkLegend([]string{"Human", "AI-tagged"})
+	opt["tooltip"] = darkTooltip(map[string]any{"type": "shadow"})
+	opt["xAxis"] = darkCategoryAxis(labels)
+	opt["yAxis"] = darkValueAxis(nil)
+	opt["series"] = []map[string]any{humanSeries, aiSeries}
+	return opt
 }
 
 // buildAdoptionOption produces the ECharts option for the AI-author
-// adoption line chart (percentage of weekly active devs with at least one
-// AI-tagged commit).
+// adoption line chart (percentage of weekly active devs with at least
+// one AI-tagged commit).
 func buildAdoptionOption(weeks []analyze.WeekStats, cutover analyze.Cutover) map[string]any {
-	labels := make([]string, len(weeks))
+	labels, cutoverIdx := axisLabelsAndCutover(weeks, cutover)
 	pct := make([]float64, len(weeks))
-	cutoverIdx := -1
 	for i, w := range weeks {
-		labels[i] = w.WeekStart.Format("Jan 02")
 		pct[i] = w.AdoptionRatio() * 100
-		if cutover.Detected && w.WeekStart.Equal(cutover.Date) {
-			cutoverIdx = i
-		}
 	}
 
 	series := map[string]any{
-		"name":   "AI-using devs %",
-		"type":   "line",
-		"smooth": true,
-		"data":   pct,
-		"areaStyle": map[string]any{
-			"opacity": 0.15,
-		},
+		"name":       "AI-using devs %",
+		"type":       "line",
+		"smooth":     true,
+		"data":       pct,
+		"symbol":     "circle",
+		"symbolSize": 8,
+		"lineStyle":  map[string]any{"width": 3},
+		"areaStyle":  map[string]any{"opacity": 0.18},
 	}
 	if cutoverIdx >= 0 {
 		series["markLine"] = cutoverMarkLine(cutoverIdx)
 	}
 
+	opt := darkChartBase("AI adoption — % of weekly active devs", cutover)
+	opt["color"] = []string{chartAccent}
+	opt["legend"] = darkLegend([]string{"AI-using devs %"})
+	opt["tooltip"] = darkTooltip(nil)
+	opt["xAxis"] = darkCategoryAxis(labels)
+	opt["yAxis"] = darkValueAxis(map[string]any{
+		"min":       0,
+		"max":       100,
+		"axisLabel": map[string]any{"formatter": "{value}%", "color": chartMuted},
+	})
+	opt["series"] = []map[string]any{series}
+	return opt
+}
+
+// axisLabelsAndCutover returns one axis label per week plus the index of
+// the cutover week (-1 if no cutover detected).
+func axisLabelsAndCutover(weeks []analyze.WeekStats, cutover analyze.Cutover) ([]string, int) {
+	labels := make([]string, len(weeks))
+	cutoverIdx := -1
+	for i, w := range weeks {
+		labels[i] = w.WeekStart.Format("Jan 02")
+		if cutover.Detected && w.WeekStart.Equal(cutover.Date) {
+			cutoverIdx = i
+		}
+	}
+	return labels, cutoverIdx
+}
+
+// darkChartBase contains the option keys common to every chart on the
+// deck: backgrounds, font, title with the cutover subtext, and grid
+// padding. Callers add color, legend, tooltip, axes, series.
+func darkChartBase(title string, cutover analyze.Cutover) map[string]any {
 	return map[string]any{
-		"title":   titleWithCutover("AI adoption — % of weekly active devs", cutover),
-		"tooltip": map[string]any{"trigger": "axis"},
-		"legend":  map[string]any{"data": []string{"AI-using devs %"}},
-		"grid":    map[string]any{"left": 56, "right": 24, "top": 80, "bottom": 64},
-		"xAxis": map[string]any{
-			"type":      "category",
-			"data":      labels,
-			"axisLabel": map[string]any{"rotate": 45, "interval": 0},
+		"backgroundColor": chartBG,
+		"textStyle": map[string]any{
+			"color":      chartFG,
+			"fontFamily": chartFontStack,
 		},
-		"yAxis": map[string]any{
-			"type":      "value",
-			"min":       0,
-			"max":       100,
-			"axisLabel": map[string]any{"formatter": "{value}%"},
+		"title": titleWithCutover(title, cutover),
+		"grid": map[string]any{
+			"left":         60,
+			"right":        30,
+			"top":          90,
+			"bottom":       70,
+			"containLabel": true,
 		},
-		"series": []map[string]any{series},
 	}
 }
 
+func darkLegend(names []string) map[string]any {
+	return map[string]any{
+		"data":       names,
+		"top":        54,
+		"textStyle":  map[string]any{"color": "#d1d5db"},
+		"icon":       "roundRect",
+		"itemWidth":  14,
+		"itemHeight": 8,
+	}
+}
+
+func darkTooltip(axisPointer map[string]any) map[string]any {
+	tt := map[string]any{
+		"trigger":         "axis",
+		"backgroundColor": chartTooltipBG,
+		"borderColor":     chartGridLine,
+		"borderWidth":     1,
+		"textStyle":       map[string]any{"color": chartFG},
+	}
+	if axisPointer != nil {
+		tt["axisPointer"] = axisPointer
+	}
+	return tt
+}
+
+func darkCategoryAxis(labels []string) map[string]any {
+	return map[string]any{
+		"type":      "category",
+		"data":      labels,
+		"axisLabel": map[string]any{"rotate": 45, "interval": 0, "color": chartMuted},
+		"axisLine":  map[string]any{"lineStyle": map[string]any{"color": chartAxisLine}},
+		"axisTick":  map[string]any{"lineStyle": map[string]any{"color": chartAxisLine}},
+	}
+}
+
+// darkValueAxis returns a y-axis option. The extra map's keys override
+// the defaults so callers can set min/max/axisLabel.formatter.
+func darkValueAxis(extra map[string]any) map[string]any {
+	a := map[string]any{
+		"type":      "value",
+		"axisLabel": map[string]any{"color": chartMuted},
+		"axisLine":  map[string]any{"show": false},
+		"splitLine": map[string]any{"lineStyle": map[string]any{"color": chartGridLine}},
+	}
+	for k, v := range extra {
+		a[k] = v
+	}
+	return a
+}
+
 func titleWithCutover(text string, cutover analyze.Cutover) map[string]any {
-	title := map[string]any{"text": text, "left": "center"}
+	title := map[string]any{
+		"text":      text,
+		"left":      "center",
+		"top":       8,
+		"textStyle": map[string]any{"color": chartFG, "fontSize": 20, "fontWeight": "bold"},
+	}
 	if cutover.Detected {
 		title["subtext"] = fmt.Sprintf("AI adoption cutover: %s (%s)",
 			cutover.Date.Format("Jan 2, 2006"), cutover.Reason)
+		title["subtextStyle"] = map[string]any{"color": chartMuted, "fontSize": 13}
 	}
 	return title
 }
 
+// cutoverMarkLine returns a dashed amber vertical line at xIndex with a
+// pill-shaped label that reads cleanly regardless of where it sits on
+// the axis (including index 0, where ECharts' default end-positioned
+// label would be clipped against the chart edge).
 func cutoverMarkLine(xIndex int) map[string]any {
 	return map[string]any{
 		"silent": true,
 		"symbol": "none",
 		"lineStyle": map[string]any{
-			"color": "#cc0000",
+			"color": chartAccent,
 			"type":  "dashed",
-			"width": 2,
+			"width": 3,
 		},
 		"label": map[string]any{
-			"formatter": "AI cutover",
-			"position":  "end",
+			"formatter":       "▼ AI cutover",
+			"position":        "insideStartTop",
+			"color":           chartDeckBG,
+			"backgroundColor": chartAccent,
+			"padding":         []int{4, 10, 4, 10},
+			"borderRadius":    4,
+			"fontWeight":      "bold",
+			"fontSize":        13,
 		},
 		"data": []map[string]any{{"xAxis": xIndex}},
 	}

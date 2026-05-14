@@ -13,7 +13,12 @@ import (
 	"github.com/StephanSchmidt/loupe/internal/config"
 )
 
-//go:embed assets/reveal/reveal.js assets/reveal/reveal.css assets/reveal/theme/white.css assets/echarts/echarts.min.js
+// reveal.css carries reveal's slide-layout primitives. We ship our own
+// dark theme inline in template.html.tmpl rather than embedding one of
+// reveal's bundled themes (white.css / black.css / …), so the embed
+// glob deliberately excludes the theme/ subtree.
+//
+//go:embed assets/reveal/reveal.js assets/reveal/reveal.css assets/echarts/echarts.min.js
 var revealAssets embed.FS
 
 //go:embed template.html.tmpl
@@ -45,7 +50,6 @@ type DeckData struct {
 //	  index.html
 //	  assets/reveal.js
 //	  assets/reveal.css
-//	  assets/theme/white.css
 //	  assets/echarts.min.js
 //	  charts/throughput.png   (paste-into-Slack)
 //	  charts/throughput.svg   (high-res embed)

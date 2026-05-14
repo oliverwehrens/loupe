@@ -29,7 +29,6 @@ func TestRenderDeck_ProducesAllArtifacts(t *testing.T) {
 		"index.html",
 		"assets/reveal.js",
 		"assets/reveal.css",
-		"assets/theme/white.css",
 		"assets/echarts.min.js",
 		"charts/throughput.png",
 		"charts/throughput.svg",
@@ -64,10 +63,19 @@ func TestRenderDeck_ProducesAllArtifacts(t *testing.T) {
 		"echarts.init",
 		"Co-Authored-By",
 		"Auto-detected",
+		// Dark theme markers — guard against accidental reversion to a
+		// light theme template.
+		`color-scheme" content="dark"`,
+		"--bg: #0b0f17",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("index.html missing %q", want)
 		}
+	}
+	// Lock-in: the deck no longer ships a theme stylesheet — the dark
+	// theme lives inline in the template.
+	if strings.Contains(body, "theme/white.css") || strings.Contains(body, "theme/black.css") {
+		t.Errorf("index.html still references a reveal theme stylesheet — should be inline-only")
 	}
 }
 
