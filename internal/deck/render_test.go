@@ -31,6 +31,10 @@ func TestRenderDeck_ProducesAllArtifacts(t *testing.T) {
 		"assets/reveal.css",
 		"assets/theme/white.css",
 		"assets/echarts.min.js",
+		"charts/throughput.png",
+		"charts/throughput.svg",
+		"charts/adoption.png",
+		"charts/adoption.svg",
 	}
 	for _, f := range wantFiles {
 		p := filepath.Join(dir, f)

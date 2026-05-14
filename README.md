@@ -47,6 +47,13 @@ loupe status      # local sqlite summary — no API calls
 
 `loupe baseline` prompts (echo off) for the Bitbucket app password and Jira API token every invocation. No env vars, no keychain in v0. State is kept locally at `.loupe/state.db`; decks land under `./reports/<timestamp>/index.html`.
 
+Alongside the interactive deck, each run also writes standalone chart exports under `./reports/<timestamp>/charts/`:
+
+- `throughput.png`, `adoption.png` — paste straight into Slack or email
+- `throughput.svg`, `adoption.svg` — high-resolution for board docs / wikis
+
+These are static snapshots — the in-browser deck uses Apache ECharts for the interactive version.
+
 ## Config
 
 `loupe.yaml` holds non-secret coordinates only. See [`loupe.example.yaml`](loupe.example.yaml) for the full shape:

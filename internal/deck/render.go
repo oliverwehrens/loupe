@@ -47,9 +47,14 @@ type DeckData struct {
 //	  assets/reveal.css
 //	  assets/theme/white.css
 //	  assets/echarts.min.js
+//	  charts/throughput.png   (paste-into-Slack)
+//	  charts/throughput.svg   (high-res embed)
+//	  charts/adoption.png
+//	  charts/adoption.svg
 //
-// Charts are rendered client-side by Apache ECharts; the Go side only
-// emits JSON option payloads embedded in the index.html.
+// The slide deck renders charts client-side with Apache ECharts. The
+// PNG/SVG files under charts/ are server-side exports for sharing in
+// Slack, email, or static docs — they're not referenced by index.html.
 //
 // deckDir is created if missing. An existing deckDir is overwritten in place.
 func RenderDeck(
@@ -67,13 +72,17 @@ func RenderDeck(
 		return err
 	}
 
-	charts, err := BuildChartPayload(weeks, cutover)
+	payload, err := BuildChartPayload(weeks, cutover)
 	if err != nil {
 		return fmt.Errorf("build chart payload: %w", err)
 	}
 
+	if err := RenderStaticCharts(weeks, cutover, filepath.Join(deckDir, "charts")); err != nil {
+		return fmt.Errorf("render static charts: %w", err)
+	}
+
 	data := buildDeckData(cfg, weeks, cutover, reportDate)
-	data.Charts = charts
+	data.Charts = payload
 	tmpl, err := template.New("deck").Parse(deckTemplate)
 	if err != nil {
 		return fmt.Errorf("parse template: %w", err)
