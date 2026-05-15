@@ -36,6 +36,10 @@ func runPresent(cmd *cobra.Command, args []string) error {
 	runArg, _ := cmd.Flags().GetString("run")
 	port, _ := cmd.Flags().GetInt("port")
 
+	if port < 0 || port > 65535 {
+		return fmt.Errorf("--port %d is out of range (0–65535; 0 picks a free port)", port)
+	}
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
@@ -56,5 +60,5 @@ func runPresent(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no rendered deck at %s — run `loupe baseline` first", deckDir)
 	}
 
-	return deck.Serve(deckDir, port, os.Stdout, browser.DefaultOpener{})
+	return deck.Serve(deckDir, port, cmd.OutOrStdout(), browser.DefaultOpener{})
 }

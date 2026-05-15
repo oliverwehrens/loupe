@@ -32,7 +32,11 @@ func promptToken(label string, w io.Writer, read func() ([]byte, error)) (string
 	if err != nil {
 		return "", fmt.Errorf("read token: %w", err)
 	}
-	return strings.TrimSpace(string(raw)), nil
+	tok := strings.TrimSpace(string(raw))
+	if tok == "" {
+		return "", fmt.Errorf("%s is required", label)
+	}
+	return tok, nil
 }
 
 func readPasswordFromStdin() ([]byte, error) {

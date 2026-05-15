@@ -2,6 +2,7 @@ package cmdinit
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -80,6 +81,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	outPath, _ := cmd.Flags().GetString("out")
 	force, _ := cmd.Flags().GetBool("force")
 
+	// Fail-fast UX check so the user isn't prompted through the whole
+	// wizard before discovering the file exists. The real safety net
+	// against a TOCTOU race is the O_EXCL in writeConfig.
 	if _, err := os.Stat(outPath); err == nil && !force {
 		return fmt.Errorf("%s already exists; pass --force to overwrite", outPath)
 	}
@@ -94,7 +98,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := writeConfig(outPath, data); err != nil {
+	if err := writeConfig(outPath, force, data); err != nil {
 		return err
 	}
 
@@ -127,13 +131,24 @@ func collectAnswers(in *bufio.Reader, out io.Writer) (templateData, error) {
 	return d, nil
 }
 
-func writeConfig(outPath string, data templateData) error {
+func writeConfig(outPath string, force bool, data templateData) error {
 	tmpl, err := template.New("config").Parse(configTemplate)
 	if err != nil {
 		return fmt.Errorf("parse config template: %w", err)
 	}
-	f, err := os.OpenFile(outPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- wizard's own --out flag
+	// Without --force, use O_EXCL so the open atomically refuses to
+	// clobber an existing file. The previous Stat → OpenFile sequence had
+	// a TOCTOU window where a parallel actor could create the file
+	// between the two calls.
+	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	if !force {
+		flags = os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	}
+	f, err := os.OpenFile(outPath, flags, 0o600) // #nosec G304 -- wizard's own --out flag
 	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("%s already exists; pass --force to overwrite", outPath)
+		}
 		return fmt.Errorf("create %s: %w", outPath, err)
 	}
 	defer func() { _ = f.Close() }()

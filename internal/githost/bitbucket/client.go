@@ -124,7 +124,13 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]githost.Workspace, error
 	var out []githost.Workspace
 	next := "/2.0/workspaces"
 	rawQuery := "pagelen=100"
-	for next != "" {
+	prev := ""
+	for pages := 0; next != ""; pages++ {
+		cur := cursor(next, rawQuery)
+		if err := guardPagination(prev, cur, pages); err != nil {
+			return nil, fmt.Errorf("list workspaces: %w", err)
+		}
+		prev = cur
 		var page pagedList[wsWire]
 		nextURL, err := c.getPage(ctx, next, rawQuery, &page)
 		if err != nil {
@@ -144,7 +150,13 @@ func (c *Client) ListRepos(ctx context.Context, workspaceSlug string) ([]githost
 	var out []githost.Repo
 	next := "/2.0/repositories/" + url.PathEscape(workspaceSlug)
 	rawQuery := "pagelen=100"
-	for next != "" {
+	prev := ""
+	for pages := 0; next != ""; pages++ {
+		cur := cursor(next, rawQuery)
+		if err := guardPagination(prev, cur, pages); err != nil {
+			return nil, fmt.Errorf("list repos for %s: %w", workspaceSlug, err)
+		}
+		prev = cur
 		var page pagedList[repoWire]
 		nextURL, err := c.getPage(ctx, next, rawQuery, &page)
 		if err != nil {
@@ -174,7 +186,14 @@ func (c *Client) ListCommits(ctx context.Context, repo githost.RepoRef, since ti
 	return func(yield func(githost.Commit, error) bool) {
 		next := "/2.0/repositories/" + url.PathEscape(repo.Workspace) + "/" + url.PathEscape(repo.Slug) + "/commits"
 		rawQuery := "pagelen=100"
-		for next != "" {
+		prev := ""
+		for pages := 0; next != ""; pages++ {
+			cur := cursor(next, rawQuery)
+		if err := guardPagination(prev, cur, pages); err != nil {
+				yield(githost.Commit{}, fmt.Errorf("list commits %s/%s: %w", repo.Workspace, repo.Slug, err))
+				return
+			}
+			prev = cur
 			var page pagedList[commitWire]
 			nextURL, err := c.getPage(ctx, next, rawQuery, &page)
 			if err != nil {
@@ -202,7 +221,14 @@ func (c *Client) ListPullRequests(ctx context.Context, repo githost.RepoRef, sin
 		next := "/2.0/repositories/" + url.PathEscape(repo.Workspace) + "/" + url.PathEscape(repo.Slug) + "/pullrequests"
 		// Without state= the API only returns OPEN. We want everything.
 		rawQuery := "pagelen=50&state=OPEN&state=MERGED&state=DECLINED&state=SUPERSEDED&sort=-updated_on"
-		for next != "" {
+		prev := ""
+		for pages := 0; next != ""; pages++ {
+			cur := cursor(next, rawQuery)
+		if err := guardPagination(prev, cur, pages); err != nil {
+				yield(githost.PullRequest{}, fmt.Errorf("list PRs %s/%s: %w", repo.Workspace, repo.Slug, err))
+				return
+			}
+			prev = cur
 			var page pagedList[prWire]
 			nextURL, err := c.getPage(ctx, next, rawQuery, &page)
 			if err != nil {
@@ -229,7 +255,13 @@ func (c *Client) ListPRCommits(ctx context.Context, repo githost.RepoRef, prID s
 	next := fmt.Sprintf("/2.0/repositories/%s/%s/pullrequests/%s/commits",
 		url.PathEscape(repo.Workspace), url.PathEscape(repo.Slug), url.PathEscape(prID))
 	rawQuery := "pagelen=100"
-	for next != "" {
+	prev := ""
+	for pages := 0; next != ""; pages++ {
+		cur := cursor(next, rawQuery)
+		if err := guardPagination(prev, cur, pages); err != nil {
+			return nil, fmt.Errorf("list PR commits %s/%s#%s: %w", repo.Workspace, repo.Slug, prID, err)
+		}
+		prev = cur
 		var page pagedList[commitWire]
 		nextURL, err := c.getPage(ctx, next, rawQuery, &page)
 		if err != nil {
@@ -275,6 +307,33 @@ func (c *Client) getPage(ctx context.Context, path, rawQuery string, dest any) (
 	}
 	return "", nil
 }
+
+// maxPaginationPages caps any single paginated enumeration to a
+// generous-but-finite ceiling. At pagelen=100 this covers up to 1M items,
+// well above any realistic org, but guarantees a misbehaving cursor that
+// never terminates eventually fails rather than spins forever.
+const maxPaginationPages = 10000
+
+// guardPagination returns a non-nil error when the paginator should
+// abort: either the page count exceeded maxPaginationPages, or the next
+// cursor matches the previous one (a stuck cursor we've actually seen
+// from Bitbucket Cloud during stale-cache incidents). The cursor passed
+// in must include both path and query so that same-path/different-query
+// pagination doesn't false-positive.
+func guardPagination(prev, next string, pages int) error {
+	if pages >= maxPaginationPages {
+		return fmt.Errorf("pagination exceeded %d pages — aborting", maxPaginationPages)
+	}
+	if next != "" && next == prev {
+		return fmt.Errorf("pagination cursor did not advance: %q", next)
+	}
+	return nil
+}
+
+// cursor returns a single comparable token for guardPagination. Bitbucket
+// pagination uses (path, rawQuery) pairs; concatenating with a sentinel
+// keeps them distinguishable.
+func cursor(path, rawQuery string) string { return path + "?" + rawQuery }
 
 // nextPathQuery splits a Bitbucket `next` URL into (path, raw query) for
 // re-use against the same apiclient base. Bitbucket's `next` is a full
@@ -340,10 +399,10 @@ func prFromWire(raw prWire) githost.PullRequest {
 			pr.MergedAt = &t
 		}
 	}
+	// Bitbucket only exposes the raw "Name <email>" string. If no email
+	// can be parsed, leave AuthorEmail empty rather than writing the
+	// display name — downstream joins treat this column as an email.
 	_, email := emailFromRaw(raw.Author.Raw)
 	pr.AuthorEmail = email
-	if email == "" {
-		pr.AuthorEmail = raw.Author.DisplayName
-	}
 	return pr
 }

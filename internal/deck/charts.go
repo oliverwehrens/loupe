@@ -140,12 +140,20 @@ func buildAdoptionOption(weeks []analyze.WeekStats, cutover analyze.Cutover) map
 }
 
 // axisLabelsAndCutover returns one axis label per week plus the index of
-// the cutover week (-1 if no cutover detected).
+// the cutover week (-1 if no cutover detected). The first label of each
+// calendar year carries the year so a multi-year window doesn't render
+// ambiguous "Jan 05" / "Jan 05" pairs 52 weeks apart.
 func axisLabelsAndCutover(weeks []analyze.WeekStats, cutover analyze.Cutover) ([]string, int) {
 	labels := make([]string, len(weeks))
 	cutoverIdx := -1
+	prevYear := 0
 	for i, w := range weeks {
-		labels[i] = w.WeekStart.Format("Jan 02")
+		layout := "Jan 02"
+		if w.WeekStart.Year() != prevYear {
+			layout = "Jan 02 2006"
+		}
+		labels[i] = w.WeekStart.Format(layout)
+		prevYear = w.WeekStart.Year()
 		if cutover.Detected && w.WeekStart.Equal(cutover.Date) {
 			cutoverIdx = i
 		}

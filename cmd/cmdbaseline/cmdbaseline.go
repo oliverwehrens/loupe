@@ -90,6 +90,11 @@ func runBaseline(cmd *cobra.Command, args []string) error {
 		_, _ = fmt.Fprintln(opts.out, "config valid; --dry-run set, not writing state")
 		return nil
 	}
+	// Fail fast on an unwritable reports dir, before kicking off a multi-minute
+	// ingest. RenderDeck does its own MkdirAll later; this is purely a pre-flight.
+	if err := os.MkdirAll(opts.cfg.Output.Path, 0o750); err != nil {
+		return fmt.Errorf("create reports dir %s: %w", opts.cfg.Output.Path, err)
+	}
 	gh, err := buildGitHost(opts.cfg, opts.gitHostToken, opts.gitHostBaseURL)
 	if err != nil {
 		return err
@@ -98,7 +103,7 @@ func runBaseline(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return runPipeline(context.Background(), opts, gh, trk)
+	return runPipeline(cmd.Context(), opts, gh, trk)
 }
 
 // loadBaselineOpts pulls config + flags + interactive prompts together.
@@ -244,7 +249,7 @@ func runAnalyze(ctx context.Context, s *store.Store, opts *baselineOpts) ([]anal
 	if err != nil {
 		return nil, analyze.Cutover{}, err
 	}
-	cutover, err := analyze.DetectCutover(ctx, s, opts.cfg.AIAdoption.MinWeeklyCommitsForCutover, opts.override)
+	cutover, err := analyze.DetectCutover(ctx, s, *opts.cfg.AIAdoption.MinWeeklyCommitsForCutover, opts.override)
 	if err != nil {
 		return nil, analyze.Cutover{}, err
 	}
@@ -345,6 +350,3 @@ func resolveCutoverOverride(cliFlag, configValue string) (time.Time, error) {
 	return t, nil
 }
 
-// Compile-time use of io.Writer to keep the import — exposed in case a
-// future flag/feature needs to fork its progress writer.
-var _ io.Writer = os.Stdout

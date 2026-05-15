@@ -143,14 +143,13 @@ func assertStatus(out string) error {
 
 func assertDeck(workDir string) error {
 	reports := filepath.Join(workDir, "reports")
-	entries, err := os.ReadDir(reports)
+	// Run dirs use a sortable UTC timestamp prefix, so the lex-greatest
+	// entry is the newest. Take that instead of entries[0] so multi-run
+	// smoke harnesses (e.g. baseline → run) check the latest deck.
+	runDir, err := latestSubdir(reports)
 	if err != nil {
-		return fmt.Errorf("read reports dir: %w", err)
+		return err
 	}
-	if len(entries) == 0 {
-		return fmt.Errorf("no run dir under %s", reports)
-	}
-	runDir := filepath.Join(reports, entries[0].Name())
 	for _, rel := range []string{
 		"index.html",
 		"assets/reveal.js",
@@ -169,6 +168,26 @@ func assertDeck(workDir string) error {
 		}
 	}
 	return nil
+}
+
+func latestSubdir(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("read dir: %w", err)
+	}
+	var newest string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if e.Name() > newest {
+			newest = e.Name()
+		}
+	}
+	if newest == "" {
+		return "", fmt.Errorf("no run dir under %s", dir)
+	}
+	return filepath.Join(dir, newest), nil
 }
 
 // --- HTTP dispatch ---

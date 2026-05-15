@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+
 	"github.com/spf13/cobra"
 
 	"github.com/StephanSchmidt/loupe/internal/analyze"
@@ -63,16 +64,15 @@ func runRender(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = s.Close() }()
 
-	return renderFromStore(cmd.OutOrStdout(), cfg, s, override)
+	return renderFromStore(cmd.Context(), cmd.OutOrStdout(), cfg, s, override)
 }
 
-func renderFromStore(out io.Writer, cfg *config.Config, s *store.Store, override time.Time) error {
-	ctx := context.Background()
+func renderFromStore(ctx context.Context, out io.Writer, cfg *config.Config, s *store.Store, override time.Time) error {
 	weeks, err := analyze.WeeklyStats(ctx, s)
 	if err != nil {
 		return err
 	}
-	cutover, err := analyze.DetectCutover(ctx, s, cfg.AIAdoption.MinWeeklyCommitsForCutover, override)
+	cutover, err := analyze.DetectCutover(ctx, s, *cfg.AIAdoption.MinWeeklyCommitsForCutover, override)
 	if err != nil {
 		return err
 	}

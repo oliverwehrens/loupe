@@ -66,9 +66,11 @@ type TeamConfig struct {
 }
 
 type AIAdoptionConfig struct {
-	CutoverDate                string          `yaml:"cutover_date,omitempty"`
-	Detection                  DetectionConfig `yaml:"detection"`
-	MinWeeklyCommitsForCutover float64         `yaml:"min_weekly_commits_for_cutover"`
+	CutoverDate string          `yaml:"cutover_date,omitempty"`
+	Detection   DetectionConfig `yaml:"detection"`
+	// Pointer so an explicit `0` in YAML (meaning "always meet the
+	// threshold") is preserved instead of being replaced by the default.
+	MinWeeklyCommitsForCutover *float64 `yaml:"min_weekly_commits_for_cutover,omitempty"`
 }
 
 type DetectionConfig struct {
@@ -102,8 +104,9 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
-	if c.AIAdoption.MinWeeklyCommitsForCutover == 0 {
-		c.AIAdoption.MinWeeklyCommitsForCutover = defaultMinWeeklyAICommitsForCutover
+	if c.AIAdoption.MinWeeklyCommitsForCutover == nil {
+		v := defaultMinWeeklyAICommitsForCutover
+		c.AIAdoption.MinWeeklyCommitsForCutover = &v
 	}
 	if c.Windows.BaselineWeeks == 0 {
 		c.Windows.BaselineWeeks = defaultBaselineWeeks
@@ -175,6 +178,12 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// ParseCutoverDate parses a YYYY-MM-DD config value as a UTC midnight.
+// Note for users east/west of UTC: the cutover date is interpreted in UTC
+// before being bucketed to its ISO-week (Mon 00:00 UTC). The edge case to
+// know about: if your local calendar date is a Monday, set the same date
+// here; if it's a Sunday or any other day, ISO-week bucketing puts the
+// cutover at the start of the same ISO week regardless of timezone.
 func ParseCutoverDate(s string) (time.Time, error) {
 	return time.Parse("2006-01-02", s)
 }

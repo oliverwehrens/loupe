@@ -39,7 +39,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = s.Close() }()
 
-	return WriteStatus(context.Background(), s, out)
+	return WriteStatus(cmd.Context(), s, out)
 }
 
 // WriteStatus is the format-and-print path, separated from runStatus so

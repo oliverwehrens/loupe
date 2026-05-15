@@ -13,6 +13,7 @@ func BuildExportCmd() *cobra.Command {
 		Long: `Bundles the reveal.js deck into a self-contained directory you can
 zip, email, or commit to a reports/ branch. With --pdf, renders the deck to
 a single PDF file via headless Chromium.`,
+		Hidden:       true,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return errors.New("not yet implemented")

@@ -118,8 +118,14 @@ func renderStaticAdoption(weeks []analyze.WeekStats, cutover analyze.Cutover, ou
 func buildStaticLabels(weeks []analyze.WeekStats, cutover analyze.Cutover) ([]string, int) {
 	labels := make([]string, len(weeks))
 	cutoverIdx := -1
+	prevYear := 0
 	for i, w := range weeks {
-		labels[i] = w.WeekStart.Format("Jan 02")
+		layout := "Jan 02"
+		if w.WeekStart.Year() != prevYear {
+			layout = "Jan 02 2006"
+		}
+		labels[i] = w.WeekStart.Format(layout)
+		prevYear = w.WeekStart.Year()
 		if cutover.Detected && w.WeekStart.Equal(cutover.Date) {
 			cutoverIdx = i
 		}

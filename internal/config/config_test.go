@@ -119,11 +119,36 @@ tracker:
 	if c.Windows.BaselineWeeks != 12 {
 		t.Errorf("Windows.BaselineWeeks default = %d, want 12", c.Windows.BaselineWeeks)
 	}
-	if c.AIAdoption.MinWeeklyCommitsForCutover != 0.05 {
+	if c.AIAdoption.MinWeeklyCommitsForCutover == nil || *c.AIAdoption.MinWeeklyCommitsForCutover != 0.05 {
 		t.Errorf("MinWeeklyCommitsForCutover default = %v, want 0.05", c.AIAdoption.MinWeeklyCommitsForCutover)
 	}
 	if c.Output.Path != "./reports" {
 		t.Errorf("Output.Path default = %q, want ./reports", c.Output.Path)
+	}
+}
+
+func TestLoad_PreservesExplicitZeroCutoverThreshold(t *testing.T) {
+	path := writeConfig(t, `
+org: zero
+git_host:
+  provider: bitbucket-cloud
+  username: u
+tracker:
+  provider: jira-cloud
+  site: x.atlassian.net
+  email: u@x
+ai_adoption:
+  min_weekly_commits_for_cutover: 0
+`)
+	c, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.AIAdoption.MinWeeklyCommitsForCutover == nil {
+		t.Fatal("MinWeeklyCommitsForCutover = nil, want pointer to 0")
+	}
+	if *c.AIAdoption.MinWeeklyCommitsForCutover != 0 {
+		t.Errorf("MinWeeklyCommitsForCutover = %v, want 0 (explicit override preserved)", *c.AIAdoption.MinWeeklyCommitsForCutover)
 	}
 }
 

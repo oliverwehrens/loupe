@@ -149,7 +149,7 @@ func TestIngestGitHost_EndToEnd(t *testing.T) {
 
 	t.Run("PR columns carry provider+workspace", func(t *testing.T) {
 		var provider, workspace string
-		if err := s.DB().QueryRow(`SELECT provider, workspace FROM prs WHERE id = '1'`).Scan(&provider, &workspace); err != nil {
+		if err := s.DB().QueryRow(`SELECT provider, workspace FROM prs WHERE id = 'fake-vcs:acme/backend#1'`).Scan(&provider, &workspace); err != nil {
 			t.Fatalf("read pr 1: %v", err)
 		}
 		if provider != "fake-vcs" || workspace != "acme" {
@@ -234,6 +234,92 @@ func TestIngestGitHost_IdempotentReruns(t *testing.T) {
 	_ = s.DB().QueryRow(`SELECT COUNT(*) FROM repos`).Scan(&nRepos)
 	if nCommits != 4 || nPRs != 1 || nRepos != 3 {
 		t.Errorf("after re-ingest: commits=%d prs=%d repos=%d (want 4/1/3 — no duplicates)", nCommits, nPRs, nRepos)
+	}
+}
+
+// TestIngestGitHost_SharedSHAKeepsFirstAttribution guards against a bug
+// where ingesting a fork (same SHA, different repo) silently overwrote
+// the original repo's attribution columns.
+func TestIngestGitHost_SharedSHAKeepsFirstAttribution(t *testing.T) {
+	s, err := store.Open(store.MemoryPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	createdAt := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	shared := githost.Commit{SHA: "deadbeef", AuthorEmail: "x@y", AuthorName: "X", CommittedAt: createdAt, Message: "shared"}
+	fake := &fakeGitHost{
+		workspaces: []githost.Workspace{{Slug: "acme", Name: "Acme"}},
+		repos: map[string][]githost.Repo{
+			"acme": {
+				{RepoRef: githost.RepoRef{Workspace: "acme", Slug: "origin"}, Name: "origin"},
+				{RepoRef: githost.RepoRef{Workspace: "acme", Slug: "fork"}, Name: "fork"},
+			},
+		},
+		commits: map[string][]githost.Commit{
+			"acme/origin": {shared},
+			"acme/fork":   {shared},
+		},
+	}
+	if _, err := IngestGitHost(context.Background(), s, fake, nil, GitHostFilter{}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	var repo string
+	if err := s.DB().QueryRow(`SELECT repo_name FROM commits WHERE sha = 'deadbeef'`).Scan(&repo); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if repo != "acme/origin" {
+		t.Errorf("repo_name = %q, want acme/origin (first-write wins for shared SHAs)", repo)
+	}
+}
+
+// TestIngestGitHost_PR_IDsAreScopedAcrossRepos guards against a bug where
+// PR #1 in repo A overwrote PR #1 in repo B because both produced the
+// same `prs.id`.
+func TestIngestGitHost_PR_IDsAreScopedAcrossRepos(t *testing.T) {
+	s, err := store.Open(store.MemoryPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	createdAt := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	fake := &fakeGitHost{
+		workspaces: []githost.Workspace{{Slug: "acme", Name: "Acme"}},
+		repos: map[string][]githost.Repo{
+			"acme": {
+				{RepoRef: githost.RepoRef{Workspace: "acme", Slug: "alpha"}, Name: "alpha"},
+				{RepoRef: githost.RepoRef{Workspace: "acme", Slug: "beta"}, Name: "beta"},
+			},
+		},
+		commits: map[string][]githost.Commit{
+			"acme/alpha": {{SHA: "a1", AuthorEmail: "x@y", CommittedAt: createdAt, Message: "a"}},
+			"acme/beta":  {{SHA: "b1", AuthorEmail: "x@y", CommittedAt: createdAt, Message: "b"}},
+		},
+		prs: map[string][]githost.PullRequest{
+			"acme/alpha": {{ID: "1", Title: "alpha-1", State: "MERGED", AuthorEmail: "x@y", CreatedAt: createdAt}},
+			"acme/beta":  {{ID: "1", Title: "beta-1", State: "MERGED", AuthorEmail: "x@y", CreatedAt: createdAt}},
+		},
+	}
+	if _, err := IngestGitHost(context.Background(), s, fake, nil, GitHostFilter{}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	var n int
+	if err := s.DB().QueryRow(`SELECT COUNT(*) FROM prs`).Scan(&n); err != nil {
+		t.Fatalf("count prs: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("got %d PRs, want 2 (one per repo — same raw id, different scopes)", n)
+	}
+
+	var alphaTitle, betaTitle string
+	_ = s.DB().QueryRow(`SELECT title FROM prs WHERE repo_name = 'acme/alpha'`).Scan(&alphaTitle)
+	_ = s.DB().QueryRow(`SELECT title FROM prs WHERE repo_name = 'acme/beta'`).Scan(&betaTitle)
+	if alphaTitle != "alpha-1" || betaTitle != "beta-1" {
+		t.Errorf("titles got (%q, %q), want (alpha-1, beta-1) — second ingest must not overwrite first", alphaTitle, betaTitle)
 	}
 }
 

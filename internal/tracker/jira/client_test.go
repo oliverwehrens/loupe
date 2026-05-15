@@ -192,6 +192,35 @@ func TestListIssues_SinceFilterRendersJQL(t *testing.T) {
 	}
 }
 
+func TestListIssues_SinceFilterUsesAccountTimezone(t *testing.T) {
+	// Jira account in UTC+10 (Australia/Sydney is +10 in May, AEST).
+	var seenJQL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/3/myself":
+			mustJSON(t, w, map[string]any{"timeZone": "Australia/Sydney"})
+		case "/rest/api/3/search/jql":
+			seenJQL = r.URL.Query().Get("jql")
+			mustJSON(t, w, map[string]any{"issues": []any{}})
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := newClient(t, srv)
+	// 2026-05-01 12:00 UTC == 2026-05-01 22:00 in Australia/Sydney (AEST, +10)
+	since := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	for _, err := range c.ListIssues(context.Background(), "ENG", since) {
+		if err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+	}
+	if !strings.Contains(seenJQL, `updated >= "2026-05-01 22:00"`) {
+		t.Errorf("JQL did not render in account timezone: %q", seenJQL)
+	}
+}
+
 func TestName(t *testing.T) {
 	c, err := NewWithBaseURL("https://x", "a@a", "t")
 	if err != nil {

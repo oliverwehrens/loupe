@@ -46,6 +46,12 @@ func DetectCutover(ctx context.Context, s *store.Store, threshold float64, overr
 		return Cutover{}, err
 	}
 	for _, w := range weeks {
+		// `>= threshold` would match every week (including AI-commit=0
+		// weeks) when threshold is 0 or negative — the very first week
+		// would be tagged as the cutover. Require some real AI activity.
+		if w.AICommits == 0 {
+			continue
+		}
 		if w.CommitRatio() >= threshold {
 			return Cutover{
 				Detected:  true,

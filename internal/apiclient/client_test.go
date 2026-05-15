@@ -6,8 +6,21 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
+
+func atomicInc(p *int32) int32 { return atomic.AddInt32(p, 1) }
+
+func mustParseHTTPTime(t *testing.T, s string) time.Time {
+	t.Helper()
+	v, err := http.ParseTime(s)
+	if err != nil {
+		t.Fatalf("ParseTime(%q): %v", s, err)
+	}
+	return v
+}
 
 type errDoer struct{ err error }
 
@@ -89,6 +102,73 @@ func TestDo_Success_AuthAndHeaders(t *testing.T) {
 	}
 	if seen.accept != "application/json" {
 		t.Errorf("Accept = %q, want application/json", seen.accept)
+	}
+}
+
+func TestDo_RetriesOn429WithRetryAfter(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n := atomicInc(&calls)
+		if n == 1 {
+			w.Header().Set("Retry-After", "0") // immediate
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"rate":"limited"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, WithProviderName("gh"))
+	resp, err := c.Do(context.Background(), "GET", "/x", "", nil)
+	if err != nil {
+		t.Fatalf("Do: %v (want retry to succeed)", err)
+	}
+	_ = resp.Body.Close()
+	if calls != 2 {
+		t.Errorf("expected 2 calls (1 + 1 retry), got %d", calls)
+	}
+}
+
+func TestDo_NoRetryWhenRetryAfterMissing(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomicInc(&calls)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"rate":"limited"}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, WithProviderName("gh"))
+	_, err := c.Do(context.Background(), "GET", "/x", "", nil)
+	if err == nil {
+		t.Fatal("expected 429 to surface as error when no Retry-After")
+	}
+	if calls != 1 {
+		t.Errorf("expected 1 call (no retry without Retry-After), got %d", calls)
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	now := mustParseHTTPTime(t, "Wed, 21 Oct 2026 07:28:00 GMT")
+	cases := []struct {
+		in       string
+		wantDur  time.Duration
+		wantOK   bool
+	}{
+		{"", 0, false},
+		{"5", 5 * time.Second, true},
+		{"0", 0, true},
+		{"-3", 0, false},
+		{"not-a-number", 0, false},
+		{"Wed, 21 Oct 2026 07:28:30 GMT", 30 * time.Second, true},
+		{"Wed, 21 Oct 2026 07:27:00 GMT", 0, true}, // past → retry immediately
+	}
+	for _, c := range cases {
+		gotDur, gotOK := parseRetryAfter(c.in, now)
+		if gotDur != c.wantDur || gotOK != c.wantOK {
+			t.Errorf("parseRetryAfter(%q) = (%v, %v), want (%v, %v)", c.in, gotDur, gotOK, c.wantDur, c.wantOK)
+		}
 	}
 }
 

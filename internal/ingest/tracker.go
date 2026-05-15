@@ -63,7 +63,10 @@ func IngestTracker(ctx context.Context, s *store.Store, t tracker.Tracker, progr
 		}
 		stats.Issues += nIssues
 
-		if err := advanceProjectWatermark(ctx, s.DB(), provider, p.Key, now); err != nil {
+		// Watermark = end-of-this-project's-ingest, not run-start. An issue
+		// updated between run-start and the moment ListIssues actually
+		// returned would otherwise be skipped on the next baseline.
+		if err := advanceProjectWatermark(ctx, s.DB(), provider, p.Key, time.Now().UTC().Unix()); err != nil {
 			return stats, err
 		}
 		if progressOut != nil {

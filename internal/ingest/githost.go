@@ -129,7 +129,11 @@ func ingestRepo(
 	}
 	stats.PullRequests += nPRs
 
-	if err := advanceRepoWatermark(ctx, db, provider, repo.FullName(), now); err != nil {
+	// Use end-of-repo-ingest time as the watermark instead of run-start.
+	// If a commit lands during the ingest with committed_at between
+	// run-start and the moment we actually fetched the commit list, using
+	// run-start would skip it on the next baseline.
+	if err := advanceRepoWatermark(ctx, db, provider, repo.FullName(), time.Now().UTC().Unix()); err != nil {
 		return err
 	}
 	if progressOut != nil {
@@ -244,15 +248,18 @@ func readRepoWatermark(ctx context.Context, db *sql.DB, provider, fullName, colu
 	return time.Unix(ts.Int64, 0).UTC(), nil
 }
 
+// upsertCommitSQL deliberately leaves provider/workspace/repo_name OUT of
+// the ON CONFLICT update set. Two repos can legitimately share a SHA
+// (forks, mirrors, monorepo extractions). We want first-write-wins
+// attribution rather than letting a later re-ingest of a fork silently
+// reassign every shared commit. The other columns (message, parent count,
+// committed_at) are content-of-the-commit so they're safe to re-sync.
 const upsertCommitSQL = `
 INSERT INTO commits (
     sha, provider, workspace, repo_name, author_email, author_name,
     committed_at, message, parent_count, files_changed, insertions, deletions
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0)
 ON CONFLICT(sha) DO UPDATE SET
-    provider     = excluded.provider,
-    workspace    = excluded.workspace,
-    repo_name    = excluded.repo_name,
     author_email = excluded.author_email,
     author_name  = excluded.author_name,
     committed_at = excluded.committed_at,
@@ -293,6 +300,14 @@ ON CONFLICT(id) DO UPDATE SET
     labels             = excluded.labels
 `
 
+// scopedPRID namespaces a provider's raw PR id (e.g. "1") with the
+// provider and repo so PR #1 in two different repos doesn't collide on
+// `prs.id`'s primary key. Provider-side ids like Bitbucket's "1" and
+// GitHub's "1" would otherwise overwrite each other across repos.
+func scopedPRID(provider, fullName, rawID string) string {
+	return provider + ":" + fullName + "#" + rawID
+}
+
 func upsertPR(ctx context.Context, db *sql.DB, provider string, repo githost.Repo, pr githost.PullRequest) error {
 	labels := ""
 	if len(pr.Labels) > 0 {
@@ -309,15 +324,16 @@ func upsertPR(ctx context.Context, db *sql.DB, provider string, repo githost.Rep
 	if pr.ClosedAt != nil {
 		closedAt = sql.NullInt64{Int64: pr.ClosedAt.Unix(), Valid: true}
 	}
+	id := scopedPRID(provider, repo.FullName(), pr.ID)
 	_, err := db.ExecContext(ctx, upsertPRSQL,
-		pr.ID, provider, repo.Workspace, repo.FullName(),
+		id, provider, repo.Workspace, repo.FullName(),
 		pr.Title, pr.State, pr.AuthorEmail,
 		pr.SourceBranch, pr.DestinationBranch,
 		pr.CreatedAt.Unix(), mergedAt, closedAt,
 		pr.MergeCommitSHA, labels,
 	)
 	if err != nil {
-		return fmt.Errorf("upsert PR %s: %w", pr.ID, err)
+		return fmt.Errorf("upsert PR %s: %w", id, err)
 	}
 	return nil
 }

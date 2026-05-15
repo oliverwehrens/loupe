@@ -17,6 +17,7 @@ baseline.
 
 Target runtime: under 1 minute. Designed to be CI-friendly — exit code 0 on
 success, non-zero on failure, plus a summary line on stdout.`,
+		Hidden:       true,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return errors.New("not yet implemented")

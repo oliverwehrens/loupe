@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -23,6 +24,11 @@ const (
 	// MaxResponseBodyBytes caps DecodeJSON reads so an oversized or
 	// misbehaving upstream cannot exhaust memory.
 	MaxResponseBodyBytes = 50 * 1024 * 1024
+
+	// maxRetryAfter caps how long we'll sleep in response to a 429
+	// Retry-After hint. A misbehaving provider could otherwise stall the
+	// run for hours.
+	maxRetryAfter = 60 * time.Second
 )
 
 // HTTPDoer abstracts request execution for testability.
@@ -168,8 +174,31 @@ func (c *Client) Do(ctx context.Context, method, path, rawQuery string, body io.
 	if resp == nil {
 		return nil, fmt.Errorf("%s %s %s: nil response", c.displayName(), method, path)
 	}
+	// One-shot retry on 429 if the upstream gives us a usable Retry-After
+	// hint. We only retry GETs (body == nil) so we don't have to rewind a
+	// consumed request body.
+	if resp.StatusCode == http.StatusTooManyRequests && body == nil {
+		if delay, ok := parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()); ok && delay <= maxRetryAfter {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+			resp, err = c.http.Do(req)
+			if err != nil {
+				return nil, fmt.Errorf("%s %s %s (after 429 retry): %w", c.displayName(), method, path, err)
+			}
+			if resp == nil {
+				return nil, fmt.Errorf("%s %s %s (after 429 retry): nil response", c.displayName(), method, path)
+			}
+		}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		// Drain the rest so the connection can be reused under keep-alive.
+		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 		return nil, &StatusError{
 			StatusCode: resp.StatusCode,
@@ -187,6 +216,32 @@ func (c *Client) displayName() string {
 		return c.providerName
 	}
 	return "api"
+}
+
+// parseRetryAfter converts an HTTP Retry-After header value to a duration.
+// Per RFC 9110 §10.2.3 it can be either a non-negative integer (seconds)
+// or an HTTP-date. The second return is true when the header carried a
+// usable hint — "0" yields (0, true) while an absent/invalid header
+// yields (0, false), so callers can distinguish "retry now" from "don't
+// retry".
+func parseRetryAfter(value string, now time.Time) (time.Duration, bool) {
+	if value == "" {
+		return 0, false
+	}
+	if secs, err := strconv.Atoi(value); err == nil {
+		if secs < 0 {
+			return 0, false
+		}
+		return time.Duration(secs) * time.Second, true
+	}
+	if t, err := http.ParseTime(value); err == nil {
+		d := t.Sub(now)
+		if d < 0 {
+			return 0, true
+		}
+		return d, true
+	}
+	return 0, false
 }
 
 // DecodeJSON reads and decodes a JSON response body into dest, then closes

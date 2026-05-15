@@ -63,9 +63,11 @@ func Serve(deckDir string, port int, statusOut io.Writer, opener browser.Opener)
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir(deckDir)))
 	srv := &http.Server{
-		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	if statusOut != nil {
@@ -83,6 +85,7 @@ func Serve(deckDir string, port int, statusOut io.Writer, opener browser.Opener)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 
 	serveErr := make(chan error, 1)
 	go func() {

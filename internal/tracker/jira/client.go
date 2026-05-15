@@ -19,6 +19,12 @@ const Provider = "jira-cloud"
 type Client struct {
 	api  *apiclient.Client
 	site string
+	// tz is the authed account's reporting timezone, fetched lazily from
+	// /rest/api/3/myself the first time ListIssues needs to format a
+	// `since` watermark into JQL. JQL date literals have no zone marker
+	// and are evaluated in the account's timezone, so formatting in UTC
+	// can drop or duplicate an entire offset's worth of issues.
+	tz *time.Location
 }
 
 // Compile-time assertion.
@@ -132,6 +138,37 @@ func (t *jiraTime) UnmarshalJSON(b []byte) error {
 	return fmt.Errorf("parse jira time %q", s)
 }
 
+// myselfWire is the slice of /rest/api/3/myself we care about. timeZone is
+// an IANA name like "Europe/Berlin" or "Etc/UTC".
+type myselfWire struct {
+	TimeZone string `json:"timeZone"`
+}
+
+// resolveTimezone returns the Jira account's reporting timezone, caching
+// the result on the client. Falls back to UTC if the API or the IANA name
+// can't be loaded — better to misalign by some hours than to fail the run.
+func (c *Client) resolveTimezone(ctx context.Context) (*time.Location, error) {
+	if c.tz != nil {
+		return c.tz, nil
+	}
+	resp, err := c.api.Do(ctx, "GET", "/rest/api/3/myself", "", nil)
+	if err != nil {
+		return nil, fmt.Errorf("fetch /myself: %w", err)
+	}
+	var m myselfWire
+	if err := apiclient.DecodeJSON(resp, &m); err != nil {
+		return nil, fmt.Errorf("decode /myself: %w", err)
+	}
+	loc := time.UTC
+	if m.TimeZone != "" {
+		if l, err := time.LoadLocation(m.TimeZone); err == nil {
+			loc = l
+		}
+	}
+	c.tz = loc
+	return loc, nil
+}
+
 // --- ListProjects ---
 
 func (c *Client) ListProjects(ctx context.Context) ([]tracker.Project, error) {
@@ -172,12 +209,23 @@ func (c *Client) ListIssues(ctx context.Context, projectKey string, since time.T
 	return func(yield func(tracker.Issue, error) bool) {
 		jql := fmt.Sprintf("project = %s ORDER BY updated DESC", projectKey)
 		if !since.IsZero() {
+			tz, err := c.resolveTimezone(ctx)
+			if err != nil {
+				yield(tracker.Issue{}, fmt.Errorf("resolve jira timezone: %w", err))
+				return
+			}
 			jql = fmt.Sprintf(`project = %s AND updated >= "%s" ORDER BY updated DESC`,
-				projectKey, since.UTC().Format("2006-01-02 15:04"))
+				projectKey, since.In(tz).Format("2006-01-02 15:04"))
 		}
 
+		const maxPages = 10000 // pagelen 100 × 10k = 1M issues, far above any real project
 		nextToken := ""
-		for {
+		prevToken := ""
+		for pages := 0; ; pages++ {
+			if pages >= maxPages {
+				yield(tracker.Issue{}, fmt.Errorf("list issues %s: pagination exceeded %d pages — aborting", projectKey, maxPages))
+				return
+			}
 			q := url.Values{}
 			q.Set("jql", jql)
 			q.Set("maxResults", "100")
@@ -203,6 +251,11 @@ func (c *Client) ListIssues(ctx context.Context, projectKey string, since time.T
 			if page.NextPageToken == "" {
 				return
 			}
+			if page.NextPageToken == prevToken && prevToken != "" {
+				yield(tracker.Issue{}, fmt.Errorf("list issues %s: pagination cursor did not advance: %q", projectKey, page.NextPageToken))
+				return
+			}
+			prevToken = nextToken
 			nextToken = page.NextPageToken
 		}
 	}
@@ -222,7 +275,11 @@ func issueFromWire(raw issueWire) tracker.Issue {
 	if raw.Fields.Assignee != nil {
 		iss.AssigneeEmail = raw.Fields.Assignee.EmailAddress
 	}
-	if raw.Fields.ResolutionDate != nil {
+	// `resolutiondate` is sometimes returned as "" rather than null on
+	// unresolved issues, in which case jiraTime.UnmarshalJSON leaves the
+	// embedded time zero. Treat zero as "unset" so downstream `*time.Time`
+	// consumers don't confuse year 0001 with a real resolution.
+	if raw.Fields.ResolutionDate != nil && !raw.Fields.ResolutionDate.Time.IsZero() {
 		t := raw.Fields.ResolutionDate.Time
 		iss.ResolvedAt = &t
 		iss.ClosedAt = &t

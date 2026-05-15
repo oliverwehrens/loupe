@@ -23,6 +23,19 @@ func TestPromptToken_TrimsAndReturnsTyped(t *testing.T) {
 	}
 }
 
+func TestPromptToken_RejectsEmpty(t *testing.T) {
+	var w bytes.Buffer
+	_, err := promptToken("Bitbucket app password", &w, func() ([]byte, error) {
+		return []byte("   "), nil
+	})
+	if err == nil {
+		t.Fatal("expected error for empty token, got nil")
+	}
+	if !strings.Contains(err.Error(), "Bitbucket app password is required") {
+		t.Errorf("err = %v, want it to mention the label and 'is required'", err)
+	}
+}
+
 func TestPromptToken_PropagatesReadError(t *testing.T) {
 	var w bytes.Buffer
 	want := fmt.Errorf("io timeout")
