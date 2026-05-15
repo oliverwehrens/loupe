@@ -2,6 +2,13 @@
 
 <p align="center"><img src="logo.svg" alt="Loupe" width="420"></p>
 
+[![CI](https://github.com/StephanSchmidt/loupe/actions/workflows/ci.yml/badge.svg)](https://github.com/StephanSchmidt/loupe/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/StephanSchmidt/loupe)](https://goreportcard.com/report/github.com/StephanSchmidt/loupe)
+[![Go Reference](https://pkg.go.dev/badge/github.com/StephanSchmidt/loupe.svg)](https://pkg.go.dev/github.com/StephanSchmidt/loupe)
+[![Latest Release](https://img.shields.io/github/v/release/StephanSchmidt/loupe)](https://github.com/StephanSchmidt/loupe/releases/latest)
+[![Dependabot](https://img.shields.io/badge/dependabot-enabled-blue?logo=dependabot)](https://github.com/StephanSchmidt/loupe/network/updates)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/StephanSchmidt/loupe/blob/main/LICENSE)
+
 Diagnostic CLI that measures the impact of AI coding assistants on engineering teams. Indexes Bitbucket Cloud and Jira Cloud via REST APIs, detects AI-assisted commits, and renders a reveal.js slide deck a CTO can present in their next exec meeting.
 
 Not an analytics platform. Closer in shape to `lighthouse` or `npm audit` — run once for a baseline, run weekly to track impact. No SaaS, no login, no data leaves your environment.
