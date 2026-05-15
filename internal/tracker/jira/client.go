@@ -279,7 +279,7 @@ func issueFromWire(raw issueWire) tracker.Issue {
 	// unresolved issues, in which case jiraTime.UnmarshalJSON leaves the
 	// embedded time zero. Treat zero as "unset" so downstream `*time.Time`
 	// consumers don't confuse year 0001 with a real resolution.
-	if raw.Fields.ResolutionDate != nil && !raw.Fields.ResolutionDate.Time.IsZero() {
+	if raw.Fields.ResolutionDate != nil && !raw.Fields.ResolutionDate.IsZero() {
 		t := raw.Fields.ResolutionDate.Time
 		iss.ResolvedAt = &t
 		iss.ClosedAt = &t
