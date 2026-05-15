@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/StephanSchmidt/loupe/internal/analyze"
 	"github.com/StephanSchmidt/loupe/internal/store"
 )
 
@@ -53,7 +56,7 @@ func WriteStatus(ctx context.Context, s *store.Store, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	commits, aiCommits, err := commitCounts(ctx, s.DB())
+	counts, err := commitCounts(ctx, s.DB())
 	if err != nil {
 		return err
 	}
@@ -62,7 +65,7 @@ func WriteStatus(ctx context.Context, s *store.Store, out io.Writer) error {
 		return err
 	}
 
-	if len(hosts) == 0 && len(trackers) == 0 && commits == 0 && tickets == 0 {
+	if len(hosts) == 0 && len(trackers) == 0 && counts.total == 0 && tickets == 0 {
 		_, _ = fmt.Fprintln(out, "Empty state — run `loupe baseline` to index providers.")
 		return nil
 	}
@@ -84,11 +87,16 @@ func WriteStatus(ctx context.Context, s *store.Store, out io.Writer) error {
 	}
 
 	aiPct := 0.0
-	if commits > 0 {
-		aiPct = float64(aiCommits) / float64(commits) * 100
+	if counts.total > 0 {
+		aiPct = float64(counts.ai) / float64(counts.total) * 100
 	}
-	_, _ = fmt.Fprintf(out, "%-10s %d  (%d AI-tagged, %.1f%%)\n", "Commits:", commits, aiCommits, aiPct)
+	_, _ = fmt.Fprintf(out, "%-10s %d  (%d AI-tagged, %.1f%%)\n", "Commits:", counts.total, counts.ai, aiPct)
 	_, _ = fmt.Fprintf(out, "%-10s %d\n", "Tickets:", tickets)
+
+	if counts.botExcluded > 0 {
+		_, _ = fmt.Fprintf(out, "Excluded %d bot-authored commits across %d bots (%s)\n",
+			counts.botExcluded, len(counts.botDisplayNames), formatBotList(counts.botDisplayNames))
+	}
 
 	return nil
 }
@@ -153,14 +161,70 @@ func perTrackerStats(ctx context.Context, db *sql.DB) ([]trackerStats, error) {
 	return out, rows.Err()
 }
 
-func commitCounts(ctx context.Context, db *sql.DB) (total, aiTagged int, _ error) {
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM commits`).Scan(&total); err != nil {
-		return 0, 0, fmt.Errorf("status: count commits: %w", err)
+type commitSummary struct {
+	total       int
+	ai          int
+	botExcluded int
+	// botDisplayNames collapses excluded bots to canonical labels
+	// (Dependabot, Renovate, …) so multiple raw email forms for the
+	// same automation appear once in the footer.
+	botDisplayNames []string
+}
+
+// commitCounts walks the commits table once, partitioning rows into the
+// human-visible numerator/denominator and the bot rollup. Both totals
+// exclude bots — those land in botExcluded / botDisplayNames so callers
+// can surface what was dropped.
+func commitCounts(ctx context.Context, db *sql.DB) (commitSummary, error) {
+	rows, err := db.QueryContext(ctx, `
+        SELECT c.author_email, c.author_name,
+               CASE WHEN sig.commit_sha IS NOT NULL THEN 1 ELSE 0 END AS is_ai
+        FROM commits c
+        LEFT JOIN (SELECT DISTINCT commit_sha FROM ai_signals) sig
+            ON sig.commit_sha = c.sha
+    `)
+	if err != nil {
+		return commitSummary{}, fmt.Errorf("status: scan commits: %w", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT commit_sha) FROM ai_signals`).Scan(&aiTagged); err != nil {
-		return 0, 0, fmt.Errorf("status: count ai_signals: %w", err)
+	defer func() { _ = rows.Close() }()
+
+	var out commitSummary
+	displayNames := make(map[string]struct{})
+	for rows.Next() {
+		var email, name string
+		var ai int
+		if err := rows.Scan(&email, &name, &ai); err != nil {
+			return commitSummary{}, fmt.Errorf("status: scan commit row: %w", err)
+		}
+		if analyze.IsBot(email, name) {
+			out.botExcluded++
+			displayNames[analyze.BotDisplayName(email, name)] = struct{}{}
+			continue
+		}
+		out.total++
+		if ai == 1 {
+			out.ai++
+		}
 	}
-	return total, aiTagged, nil
+	if err := rows.Err(); err != nil {
+		return commitSummary{}, fmt.Errorf("status: iterate commit rows: %w", err)
+	}
+	out.botDisplayNames = make([]string, 0, len(displayNames))
+	for d := range displayNames {
+		out.botDisplayNames = append(out.botDisplayNames, d)
+	}
+	sort.Strings(out.botDisplayNames)
+	return out, nil
+}
+
+// formatBotList renders the bot-name list for the exclusion footer.
+// Truncates to keep the line readable when many bots are present.
+func formatBotList(names []string) string {
+	const maxShown = 5
+	if len(names) <= maxShown {
+		return strings.Join(names, ", ")
+	}
+	return strings.Join(names[:maxShown], ", ") + ", ..."
 }
 
 func count(ctx context.Context, db *sql.DB, q string) (int, error) {

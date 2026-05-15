@@ -15,6 +15,7 @@ import (
 	"github.com/StephanSchmidt/loupe/cmd/cmdpresent"
 	"github.com/StephanSchmidt/loupe/cmd/cmdrender"
 	"github.com/StephanSchmidt/loupe/cmd/cmdrun"
+	"github.com/StephanSchmidt/loupe/cmd/cmdstats"
 	"github.com/StephanSchmidt/loupe/cmd/cmdstatus"
 )
 
@@ -44,6 +45,7 @@ exec meeting — no SaaS, no login, no data leaves the customer environment.`,
 		cmdrun.BuildRunCmd(),
 		cmdrender.BuildRenderCmd(),
 		cmdstatus.BuildStatusCmd(),
+		cmdstats.BuildStatsCmd(),
 		cmdpresent.BuildPresentCmd(),
 		cmdexport.BuildExportCmd(),
 	)

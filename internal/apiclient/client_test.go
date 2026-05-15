@@ -152,9 +152,9 @@ func TestDo_NoRetryWhenRetryAfterMissing(t *testing.T) {
 func TestParseRetryAfter(t *testing.T) {
 	now := mustParseHTTPTime(t, "Wed, 21 Oct 2026 07:28:00 GMT")
 	cases := []struct {
-		in       string
-		wantDur  time.Duration
-		wantOK   bool
+		in      string
+		wantDur time.Duration
+		wantOK  bool
 	}{
 		{"", 0, false},
 		{"5", 5 * time.Second, true},

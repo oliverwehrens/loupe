@@ -189,7 +189,7 @@ func (c *Client) ListCommits(ctx context.Context, repo githost.RepoRef, since ti
 		prev := ""
 		for pages := 0; next != ""; pages++ {
 			cur := cursor(next, rawQuery)
-		if err := guardPagination(prev, cur, pages); err != nil {
+			if err := guardPagination(prev, cur, pages); err != nil {
 				yield(githost.Commit{}, fmt.Errorf("list commits %s/%s: %w", repo.Workspace, repo.Slug, err))
 				return
 			}
@@ -224,7 +224,7 @@ func (c *Client) ListPullRequests(ctx context.Context, repo githost.RepoRef, sin
 		prev := ""
 		for pages := 0; next != ""; pages++ {
 			cur := cursor(next, rawQuery)
-		if err := guardPagination(prev, cur, pages); err != nil {
+			if err := guardPagination(prev, cur, pages); err != nil {
 				yield(githost.PullRequest{}, fmt.Errorf("list PRs %s/%s: %w", repo.Workspace, repo.Slug, err))
 				return
 			}

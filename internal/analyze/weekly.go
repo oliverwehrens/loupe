@@ -52,7 +52,7 @@ func IsoWeekStart(t time.Time) time.Time {
 // commit, ordered chronologically.
 func WeeklyStats(ctx context.Context, s *store.Store) ([]WeekStats, error) {
 	rows, err := s.DB().QueryContext(ctx, `
-        SELECT c.committed_at, c.author_email,
+        SELECT c.committed_at, c.author_email, c.author_name,
                CASE WHEN sig.commit_sha IS NOT NULL THEN 1 ELSE 0 END AS is_ai
         FROM commits c
         LEFT JOIN (SELECT DISTINCT commit_sha FROM ai_signals) sig
@@ -73,10 +73,13 @@ func WeeklyStats(ctx context.Context, s *store.Store) ([]WeekStats, error) {
 
 	for rows.Next() {
 		var ts int64
-		var email string
+		var email, name string
 		var isAI int
-		if err := rows.Scan(&ts, &email, &isAI); err != nil {
+		if err := rows.Scan(&ts, &email, &name, &isAI); err != nil {
 			return nil, fmt.Errorf("scan weekly row: %w", err)
+		}
+		if IsBot(email, name) {
+			continue
 		}
 		wk := IsoWeekStart(time.Unix(ts, 0))
 		b, ok := buckets[wk]

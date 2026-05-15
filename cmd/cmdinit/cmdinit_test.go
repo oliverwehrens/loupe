@@ -27,9 +27,9 @@ func TestInit_WritesValidConfigThatLoads(t *testing.T) {
 	stdin := strings.Join([]string{
 		"acme-eng",           // org
 		"",                   // bitbucket base url (accept default)
-		"you@example.com",  // bitbucket username
+		"you@example.com",    // bitbucket username
 		"acme.atlassian.net", // jira site
-		"you@example.com",  // jira email
+		"you@example.com",    // jira email
 	}, "\n") + "\n"
 
 	stdout, err := runWizard(t, dir, stdin)

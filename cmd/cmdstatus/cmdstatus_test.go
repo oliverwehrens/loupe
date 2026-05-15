@@ -39,11 +39,16 @@ func seedStore(t *testing.T) *store.Store {
 
 	exec(`INSERT INTO commits (sha, repo_name, author_email, author_name, committed_at, message, provider, workspace)
         VALUES
-            ('c1', 'acme/backend',  'a@a', 'A', 1700000100, 'msg', 'bitbucket-cloud', 'acme'),
-            ('c2', 'acme/backend',  'a@a', 'A', 1700000200, 'msg', 'bitbucket-cloud', 'acme'),
-            ('c3', 'acme/frontend', 'b@a', 'B', 1700000300, 'msg', 'bitbucket-cloud', 'acme')`)
+            ('c1',   'acme/backend',  'a@a', 'A', 1700000100, 'msg', 'bitbucket-cloud', 'acme'),
+            ('c2',   'acme/backend',  'a@a', 'A', 1700000200, 'msg', 'bitbucket-cloud', 'acme'),
+            ('c3',   'acme/frontend', 'b@a', 'B', 1700000300, 'msg', 'bitbucket-cloud', 'acme'),
+            ('bot1', 'acme/backend',  '49699333+dependabot[bot]@users.noreply.github.com', 'dependabot[bot]', 1700000400, 'bump', 'bitbucket-cloud', 'acme'),
+            ('bot2', 'acme/backend',  '29139614+renovate[bot]@users.noreply.github.com',   'renovate[bot]',   1700000500, 'pin',  'bitbucket-cloud', 'acme')`)
+	// Bot commit even has an AI signal — exclusion has to drop the bot
+	// before the AI-tagged count is computed.
 	exec(`INSERT INTO ai_signals (commit_sha, signal_kind, signal_source, confidence)
-        VALUES ('c2', 'co_author_trailer', 'claude', 'high')`)
+        VALUES ('c2',   'co_author_trailer', 'claude', 'high'),
+               ('bot1', 'co_author_trailer', 'claude', 'high')`)
 
 	exec(`INSERT INTO tickets (id, project_key, title, status, created_at)
         VALUES ('ENG-1', 'ENG', 't', 'Done', 1700000000)`)
@@ -68,14 +73,29 @@ func TestWriteStatus_FullySeeded(t *testing.T) {
 		"Jira:",
 		"2 projects",
 		"Commits:",
+		// Bot commits (bot1, bot2) and the bot's AI signal must not count.
 		"3  (1 AI-tagged, 33.3%)",
 		"Tickets:",
 		"1",
 		"last commit indexed",
 		"last issue indexed",
+		"Excluded 2 bot-authored commits across 2 bots (Dependabot, Renovate)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status output missing %q\nfull:\n%s", want, out)
+		}
+	}
+	// Inflated counts that would only appear if bots leaked in; raw email
+	// fragments must be gone now that display names are rendered.
+	for _, unwanted := range []string{
+		"5  (2 AI-tagged",
+		"AI-tagged, 40.0%",
+		"49699333+dependabot",
+		"29139614+renovate",
+		"@users.noreply.github.com",
+	} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("unexpected %q in status output\nfull:\n%s", unwanted, out)
 		}
 	}
 }

@@ -43,6 +43,48 @@ func TestIsoWeekStart(t *testing.T) {
 	}
 }
 
+func TestWeeklyStats_ExcludesBots(t *testing.T) {
+	s, err := store.Open(store.MemoryPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	wkMon := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
+
+	seedCommit(t, s, "h1", "alice@a", wkMon, false)
+	// Bot commits with a real AI signal — both should be skipped.
+	if _, err := s.DB().Exec(
+		`INSERT INTO commits (sha, repo_name, author_email, author_name, committed_at, message)
+         VALUES ('bot1', 'r', '49699333+dependabot[bot]@users.noreply.github.com', 'dependabot[bot]', ?, ''),
+                ('bot2', 'r', 'noreply@github.com', 'GitHub', ?, '')`,
+		wkMon.Unix(), wkMon.Add(time.Hour).Unix(),
+	); err != nil {
+		t.Fatalf("seed bot commits: %v", err)
+	}
+	if _, err := s.DB().Exec(
+		`INSERT INTO ai_signals (commit_sha, signal_kind, signal_source, confidence)
+         VALUES ('bot1', 'co_author_trailer', 'claude', 'high')`,
+	); err != nil {
+		t.Fatalf("seed bot signal: %v", err)
+	}
+
+	weeks, err := WeeklyStats(context.Background(), s)
+	if err != nil {
+		t.Fatalf("WeeklyStats: %v", err)
+	}
+	if len(weeks) != 1 {
+		t.Fatalf("len(weeks) = %d, want 1", len(weeks))
+	}
+	w := weeks[0]
+	if w.TotalCommits != 1 || w.AICommits != 0 {
+		t.Errorf("bot commits leaked: %+v, want 1 total / 0 ai", w)
+	}
+	if w.DistinctAuthors != 1 {
+		t.Errorf("DistinctAuthors = %d, want 1 (bot authors excluded)", w.DistinctAuthors)
+	}
+}
+
 func TestWeeklyStats_Aggregation(t *testing.T) {
 	s, err := store.Open(store.MemoryPath)
 	if err != nil {
