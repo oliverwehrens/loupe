@@ -13,8 +13,6 @@ Diagnostic CLI that measures the impact of AI coding assistants on engineering t
 
 Not an analytics platform. Closer in shape to `lighthouse` or `npm audit` — run once for a baseline, run weekly to track impact. No SaaS, no login, no data leaves your environment.
 
-The full design brief lives in [`loupe-brief.md`](loupe-brief.md).
-
 ## Status
 
 **v0 — usable for an honest baseline, not yet feature-complete.**
