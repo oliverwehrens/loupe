@@ -56,8 +56,13 @@ unhooks:
 
 release:
 	@test -z "$$(git status --porcelain)" || (echo "error: working tree is dirty" && exit 1)
-	@command -v gh >/dev/null || (echo "error: gh CLI required to publish brew formula" && exit 1)
+	@command -v gh >/dev/null || (echo "error: gh CLI required to publish release" && exit 1)
 	@echo "Tagging $(VERSION)..."
 	git tag -a $(VERSION) -m "Release $(VERSION)"
 	git push origin $(VERSION)
-	HOMEBREW_TAP_GITHUB_TOKEN=$$(gh auth token) go tool goreleaser release --clean
+	GITHUB_TOKEN=$$(gh auth token) HOMEBREW_TAP_GITHUB_TOKEN=$$(gh auth token) go tool goreleaser release --clean
+
+publish:
+	@test -z "$$(git status --porcelain)" || (echo "error: working tree is dirty" && exit 1)
+	@command -v gh >/dev/null || (echo "error: gh CLI required to publish release" && exit 1)
+	GITHUB_TOKEN=$$(gh auth token) HOMEBREW_TAP_GITHUB_TOKEN=$$(gh auth token) go tool goreleaser release --clean
