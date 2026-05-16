@@ -80,7 +80,7 @@ func defaultCachePath() (string, error) {
 }
 
 func readCache(path string) (cacheEntry, bool) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from os.UserCacheDir() joined with a fixed loupe/version.json
 	if err != nil {
 		return cacheEntry{}, false
 	}
@@ -92,14 +92,14 @@ func readCache(path string) (cacheEntry, bool) {
 }
 
 func writeCache(path string, entry cacheEntry) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 func fetchLatest(ctx context.Context) (string, error) {
@@ -114,6 +114,11 @@ func fetchLatest(ctx context.Context) (string, error) {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
+	}
+	if resp == nil {
+		// http.Client guarantees non-nil resp when err == nil, but nilaway
+		// can't see through the interface boundary. Explicit guard.
+		return "", fmt.Errorf("github: nil response")
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
