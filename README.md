@@ -15,7 +15,7 @@ Think `lighthouse`, but for AI adoption. Run it once for a baseline, run it agai
 
 ## Status
 
-v0.1. The headline charts work, but a lot is still on the to-do list.
+v0.3 shipped (cycle time + bot-author filtering). v0.4 adds GitLab, Linear, and Azure DevOps.
 
 What works:
 
@@ -23,13 +23,13 @@ What works:
 - AI detection across two confidence tiers: trailers, body footers, AI-bot author identity, PR labels, branch prefixes, and squash-merge recovery (high-confidence); seat-holder propagation (medium, opt-in)
 - Tool list: Claude Code, Aider, Copilot, Cursor, Devin, Gemini Code Assist, Jules, OpenCode
 - Auto-detected adoption cutover week, with a config override if you'd rather pin it
+- End-to-end cycle time (idea → dev → release) using tracker transitions, with first-commit fallback
 - reveal.js deck with weekly throughput (human vs AI evidence vs AI inferred) and adoption %, plus PNG/SVG exports
 
 Not done yet:
 
 - `loupe run` for weekly incremental updates (stub)
 - `loupe export` to static HTML / PDF (stub)
-- End-to-end cycle time (ticket → merged) — this is the chart I actually wanted
 - Per-team breakdown and a quality counterweight (defects, churn)
 - GitHub Enterprise Server
 
