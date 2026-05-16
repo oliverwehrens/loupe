@@ -30,6 +30,7 @@ func TestRenderDeck_ProducesAllArtifacts(t *testing.T) {
 		"assets/reveal.js",
 		"assets/reveal.css",
 		"assets/echarts.min.js",
+		"assets/loupe.svg",
 		"charts/throughput.png",
 		"charts/throughput.svg",
 		"charts/adoption.png",
@@ -61,6 +62,8 @@ func TestRenderDeck_ProducesAllArtifacts(t *testing.T) {
 		`id="adoption-chart"`,
 		"assets/echarts.min.js",
 		"echarts.init",
+		`class="deck-logo"`,
+		`src="assets/loupe.svg"`,
 		"Co-Authored-By",
 		"Auto-detected",
 		// Dark theme markers — guard against accidental reversion to a

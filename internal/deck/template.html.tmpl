@@ -161,9 +161,24 @@
   }
   .reveal .caveats ul { margin: 0.2em 0 0.6em; }
   .reveal .caveats p { margin: 0.4em 0; }
+
+  /* Brand logo — fixed to the viewport so it rides above every slide.
+     Sits outside .reveal so it isn't affected by reveal's slide-scale transform. */
+  .deck-logo {
+    position: fixed;
+    top: 18px;
+    right: 22px;
+    height: 44px;
+    width: auto;
+    opacity: 0.85;
+    z-index: 1000;
+    pointer-events: none;
+    user-select: none;
+  }
 </style>
 </head>
 <body>
+<img class="deck-logo" src="assets/loupe.svg" alt="Loupe">
 <div class="reveal">
 <div class="slides">
 

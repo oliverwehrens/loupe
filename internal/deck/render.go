@@ -18,7 +18,7 @@ import (
 // reveal's bundled themes (white.css / black.css / …), so the embed
 // glob deliberately excludes the theme/ subtree.
 //
-//go:embed assets/reveal/reveal.js assets/reveal/reveal.css assets/echarts/echarts.min.js
+//go:embed assets/reveal/reveal.js assets/reveal/reveal.css assets/echarts/echarts.min.js assets/logo/loupe.svg
 var revealAssets embed.FS
 
 //go:embed template.html.tmpl
@@ -163,7 +163,7 @@ func buildDeckData(
 // assets/echarts/echarts.min.js → dst/echarts.min.js. That keeps the HTML
 // template's relative-path references flat.
 func copyEmbeddedAssets(dst string) error {
-	for _, srcPrefix := range []string{"assets/reveal", "assets/echarts"} {
+	for _, srcPrefix := range []string{"assets/reveal", "assets/echarts", "assets/logo"} {
 		if err := copyEmbeddedSubtree(srcPrefix, dst); err != nil {
 			return err
 		}

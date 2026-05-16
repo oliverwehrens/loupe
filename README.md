@@ -34,14 +34,24 @@ Not yet:
 ## Install
 
 ```bash
+brew install stephanschmidt/tap/loupe
+```
+
+Or with Go:
+
+```bash
+go install github.com/StephanSchmidt/loupe/cmd/loupe@latest
+```
+
+Or from source:
+
+```bash
 git clone https://github.com/StephanSchmidt/loupe.git
 cd loupe
 make build        # produces ./bin/loupe
-# or
-go install ./cmd/loupe
 ```
 
-Homebrew tap will be wired up once releases are cut (`brew install stephanschmidt/tap/loupe`).
+Prebuilt binaries for linux / macOS / windows on amd64 + arm64 are attached to each [release](https://github.com/StephanSchmidt/loupe/releases).
 
 ## Usage
 
