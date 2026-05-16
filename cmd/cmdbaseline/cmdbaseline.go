@@ -239,11 +239,11 @@ func runIngest(ctx context.Context, opts *baselineOpts, s *store.Store, gh githo
 }
 
 func runAnalyze(ctx context.Context, s *store.Store, opts *baselineOpts) ([]analyze.WeekStats, analyze.Cutover, error) {
-	nSignals, err := analyze.DetectAndStore(ctx, s)
+	total, err := analyze.RunAllDetectors(ctx, s, detectionConfigFor(opts.cfg))
 	if err != nil {
-		return nil, analyze.Cutover{}, fmt.Errorf("detect AI signals: %w", err)
+		return nil, analyze.Cutover{}, err
 	}
-	_, _ = fmt.Fprintf(opts.out, "  %d AI signals detected\n", nSignals)
+	_, _ = fmt.Fprintf(opts.out, "  %d AI signals detected\n", total)
 
 	weeks, err := analyze.WeeklyStats(ctx, s)
 	if err != nil {
@@ -255,6 +255,24 @@ func runAnalyze(ctx context.Context, s *store.Store, opts *baselineOpts) ([]anal
 	}
 	logCutover(opts.out, cutover)
 	return weeks, cutover, nil
+}
+
+// detectionConfigFor maps the on-disk config.DetectionConfig to the
+// analyze package's DetectionConfig so the analyze package doesn't have
+// to import config. SquashMergeRecovery defaults to true via the config
+// package's applyDefaults, so the nil check here is defence in depth.
+func detectionConfigFor(cfg *config.Config) analyze.DetectionConfig {
+	d := cfg.AIAdoption.Detection
+	squash := true
+	if d.SquashMergeRecovery != nil {
+		squash = *d.SquashMergeRecovery
+	}
+	return analyze.DetectionConfig{
+		PRLabels:            d.PRLabels,
+		BranchPrefixes:      d.BranchPrefixes,
+		SquashMergeRecovery: squash,
+		SeatInference:       d.SeatInference,
+	}
 }
 
 func logCutover(out io.Writer, c analyze.Cutover) {

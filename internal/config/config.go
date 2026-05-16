@@ -74,8 +74,35 @@ type AIAdoptionConfig struct {
 }
 
 type DetectionConfig struct {
-	CoAuthorTrailers bool     `yaml:"co_author_trailers"`
-	PRLabels         []string `yaml:"pr_labels"`
+	// CoAuthorTrailers / BodyFooters / BotAuthors are always on at the
+	// detector level; the bools exist so future detectors can be opt-in
+	// without breaking config compatibility. (Today these flags are
+	// informational only.)
+	CoAuthorTrailers bool `yaml:"co_author_trailers"`
+	BodyFooters      bool `yaml:"body_footers"`
+	BotAuthors       bool `yaml:"bot_authors"`
+
+	// PRLabels lists the case-insensitive label strings that count as an
+	// AI signal. A label whose name contains a known tool ("claude",
+	// "copilot", …) gets attributed to that tool; everything else is
+	// attributed to a generic "ai" source.
+	PRLabels []string `yaml:"pr_labels"`
+
+	// BranchPrefixes lists the case-insensitive branch-name prefixes
+	// (typically "tool/") that count as an AI signal.
+	BranchPrefixes []string `yaml:"branch_prefixes"`
+
+	// SquashMergeRecovery enables fetching pre-squash PR commits and
+	// running the trailer/footer/bot detectors on them. Default true —
+	// the API cost is one extra request per PR and the recall lift on
+	// squash-merged PRs is large.
+	SquashMergeRecovery *bool `yaml:"squash_merge_recovery,omitempty"`
+
+	// SeatInference enables propagating direct AI evidence to the same
+	// author's other commits in the same week and repo. Off by default
+	// because it's the only detector that infers rather than observes —
+	// users should turn it on knowingly.
+	SeatInference bool `yaml:"seat_inference"`
 }
 
 type WindowsConfig struct {
@@ -107,6 +134,10 @@ func (c *Config) applyDefaults() {
 	if c.AIAdoption.MinWeeklyCommitsForCutover == nil {
 		v := defaultMinWeeklyAICommitsForCutover
 		c.AIAdoption.MinWeeklyCommitsForCutover = &v
+	}
+	if c.AIAdoption.Detection.SquashMergeRecovery == nil {
+		t := true
+		c.AIAdoption.Detection.SquashMergeRecovery = &t
 	}
 	if c.Windows.BaselineWeeks == 0 {
 		c.Windows.BaselineWeeks = defaultBaselineWeeks

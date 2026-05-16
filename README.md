@@ -20,9 +20,10 @@ v0.1. The headline charts work, but a lot is still on the to-do list.
 What works:
 
 - Bitbucket Cloud + Jira Cloud, or GitHub on its own (one PAT plays both roles)
-- Trailer-based AI detection for Claude Code, Aider, Copilot, and Cursor
+- AI detection across two confidence tiers: trailers, body footers, AI-bot author identity, PR labels, branch prefixes, and squash-merge recovery (high-confidence); seat-holder propagation (medium, opt-in)
+- Tool list: Claude Code, Aider, Copilot, Cursor, Devin, Gemini Code Assist, Jules, OpenCode
 - Auto-detected adoption cutover week, with a config override if you'd rather pin it
-- reveal.js deck with weekly throughput (human vs AI) and adoption %, plus PNG/SVG exports
+- reveal.js deck with weekly throughput (human vs AI evidence vs AI inferred) and adoption %, plus PNG/SVG exports
 
 Not done yet:
 
@@ -30,7 +31,6 @@ Not done yet:
 - `loupe export` to static HTML / PDF (stub)
 - End-to-end cycle time (ticket → merged) — this is the chart I actually wanted
 - Per-team breakdown and a quality counterweight (defects, churn)
-- Squash-merge trailer recovery via PR-commit lookup
 - GitLab, Linear, GitHub Enterprise Server
 
 ## Install
@@ -132,9 +132,25 @@ Loupe enumerates your own repos plus every org you belong to, and treats each re
 
 ## How AI detection works
 
-The primary signal is `Co-Authored-By:` trailers in commit messages. Claude Code and Aider write these by default. Copilot and Cursor usually don't, so adoption among Cursor/Copilot users will read lower than reality — the deck flags this so you don't misread the number.
+Detection runs in two confidence tiers. High-confidence signals are direct evidence — something specific in the commit, the PR, or the author identity. Medium-confidence signals are inferred from those. The deck splits the throughput chart into "AI (evidence)" and "AI (inferred)" whenever any week has medium-confidence commits.
 
-The cutover week is the first ISO week where AI-tagged commits hit 5% of weekly commits (configurable). You can also pin a date in `loupe.yaml` if you already know it.
+**High-confidence**
+
+- `Co-Authored-By:` trailer for Claude, Aider, Copilot, Cursor, Devin, Gemini Code Assist, Jules, OpenCode.
+- Body footer (`Generated with [Claude Code]`, `Generated with [opencode]`).
+- Author identity is a known AI bot (Copilot Coding Agent, Devin, Gemini Code Assist, Jules).
+- PR carries an AI label (`ai-generated`, `copilot`, `claude`, …) — list is configurable.
+- PR branch starts with an AI prefix (`copilot/`, `cursor/`, `claude/`, …) — list is configurable.
+- Squash-merge recovery: trailers on the pre-squash PR commits get attributed to the merge SHA, so the trailer doesn't get lost when the PR is squashed.
+
+**Medium-confidence (inferred)**
+
+- Seat-holder propagation: if a developer has any high-confidence AI commit in a given week and repo, their other commits that week and repo are marked as inferred AI. Off by default — turn it on in `loupe.yaml` if you want it.
+- Unrecognised `*[bot]` author identity: looks like a GitHub App bot, no matching tool — likely automated, tool unknown.
+
+The cutover week is the first ISO week where AI-tagged commits hit 5% of weekly commits (configurable). You can also pin a date in `loupe.yaml`.
+
+Copilot and Cursor users still tend to read low because their tools don't write trailers by default. The PR-label, branch-prefix, and squash-recovery detectors close part of that gap; the asymmetry is called out on the methodology slide either way.
 
 There's no ROI calculation. The math you'd need — hours saved per AI-tagged commit — falls apart the moment a skeptical CFO asks where the number comes from, so I didn't add it. Throughput and adoption are what the deck shows.
 

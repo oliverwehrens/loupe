@@ -19,11 +19,24 @@ teams:
     members: [carol@acme.com, dan@acme.com]
 
 ai_adoption:
-  # auto-detect by default; uncomment to override
+  # auto-detect by default; uncomment to pin manually
   # cutover_date: 2026-03-15
   detection:
     co_author_trailers: true
-    pr_labels: [ai-assisted]
+    body_footers: true
+    bot_authors: true
+    # Squash-merge recovery costs one extra API call per PR; turn off
+    # if you're rate-limited on a huge org.
+    squash_merge_recovery: true
+    # Seat inference is the only detector that infers rather than
+    # observes — it propagates direct evidence to other commits the
+    # same author made in the same week and repo. Off by default.
+    seat_inference: false
+    # Labels and branch prefixes are case-insensitive. The defaults
+    # below are baked in when these lists are empty; override here to
+    # add org-specific patterns.
+    pr_labels: [ai-generated, ai-assisted, copilot, claude, cursor, aider, devin, jules, gemini]
+    branch_prefixes: ["copilot/", "cursor/", "claude/", "aider/", "devin/", "jules/"]
   min_weekly_commits_for_cutover: 0.05
 
 windows:

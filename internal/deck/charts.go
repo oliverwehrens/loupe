@@ -27,16 +27,17 @@ type ChartPayload struct {
 // Dark-theme palette — kept in sync with template.html.tmpl's CSS vars.
 // Centralised here so chart styling matches the slide chrome.
 const (
-	chartBG        = "transparent"
-	chartFG        = "#e5e7eb"
-	chartMuted     = "#9ca3af"
-	chartGridLine  = "#1f2937"
-	chartAxisLine  = "#374151"
-	chartTooltipBG = "#11172a"
-	chartAccent    = "#f59e0b" // amber — AI-tagged + cutover marker
-	chartAccent2   = "#3b82f6" // blue   — human commits
-	chartDeckBG    = "#0b0f17" // slide background, used as label foreground on accent pill
-	chartFontStack = "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif"
+	chartBG         = "transparent"
+	chartFG         = "#e5e7eb"
+	chartMuted      = "#9ca3af"
+	chartGridLine   = "#1f2937"
+	chartAxisLine   = "#374151"
+	chartTooltipBG  = "#11172a"
+	chartAccent     = "#f59e0b" // amber — AI-tagged (high confidence) + cutover marker
+	chartAccentSoft = "#fcd34d" // softer amber — inferred AI (medium confidence)
+	chartAccent2    = "#3b82f6" // blue — human commits
+	chartDeckBG     = "#0b0f17" // slide background, used as label foreground on accent pill
+	chartFontStack  = "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif"
 )
 
 // BuildChartPayload prepares the ECharts option payloads for the deck. The
@@ -72,35 +73,62 @@ func marshalOption(opt map[string]any) ([]byte, error) {
 }
 
 // buildThroughputOption produces the ECharts option for the stacked
-// weekly commit bar chart (human vs AI-tagged). The cutover marker is
-// drawn as a JS graphic overlay (see overlayCutover in the template)
-// rather than an ECharts markLine — markLine on a category axis snaps
-// to integer indices, which would force the line through a bar centre.
+// weekly commit bar chart (human vs AI-tagged). When any week in the
+// window contains medium-confidence (inferred) AI commits, a third
+// stacked series renders them in a softer amber so the deck can show
+// evidence-based and inferred adoption side by side without conflating
+// them.
+//
+// The cutover marker is drawn as a JS graphic overlay (see overlayCutover
+// in the template) rather than an ECharts markLine — markLine on a
+// category axis snaps to integer indices, which would force the line
+// through a bar centre.
 func buildThroughputOption(weeks []analyze.WeekStats, cutover analyze.Cutover) map[string]any {
 	labels, _ := axisLabelsAndCutover(weeks, cutover)
 	human := make([]int, len(weeks))
-	ai := make([]int, len(weeks))
+	aiHigh := make([]int, len(weeks))
+	aiMed := make([]int, len(weeks))
+	hasMedium := false
 	for i, w := range weeks {
 		human[i] = w.TotalCommits - w.AICommits
-		ai[i] = w.AICommits
+		aiHigh[i] = w.AICommitsHigh
+		aiMed[i] = w.AICommitsMedium
+		if w.AICommitsMedium > 0 {
+			hasMedium = true
+		}
 	}
 
 	humanSeries := map[string]any{
 		"name": "Human", "type": "bar", "stack": "total", "data": human,
 		"itemStyle": map[string]any{"borderRadius": []int{0, 0, 0, 0}},
 	}
-	aiSeries := map[string]any{
-		"name": "AI-tagged", "type": "bar", "stack": "total", "data": ai,
-		"itemStyle": map[string]any{"borderRadius": []int{3, 3, 0, 0}},
-	}
 
 	opt := darkChartBase("Weekly commits", cutover)
-	opt["color"] = []string{chartAccent2, chartAccent}
-	opt["legend"] = darkLegend([]string{"Human", "AI-tagged"})
 	opt["tooltip"] = darkTooltip(map[string]any{"type": "shadow"})
 	opt["xAxis"] = darkCategoryAxis(labels)
 	opt["yAxis"] = darkValueAxis(nil)
-	opt["series"] = []map[string]any{humanSeries, aiSeries}
+
+	if hasMedium {
+		aiHighSeries := map[string]any{
+			"name": "AI (evidence)", "type": "bar", "stack": "total", "data": aiHigh,
+			"itemStyle": map[string]any{"borderRadius": []int{0, 0, 0, 0}},
+		}
+		aiMedSeries := map[string]any{
+			"name": "AI (inferred)", "type": "bar", "stack": "total", "data": aiMed,
+			"itemStyle": map[string]any{"borderRadius": []int{3, 3, 0, 0}},
+		}
+		opt["color"] = []string{chartAccent2, chartAccent, chartAccentSoft}
+		opt["legend"] = darkLegend([]string{"Human", "AI (evidence)", "AI (inferred)"})
+		opt["series"] = []map[string]any{humanSeries, aiHighSeries, aiMedSeries}
+	} else {
+		aiSeries := map[string]any{
+			"name": "AI-tagged", "type": "bar", "stack": "total", "data": aiHigh,
+			"itemStyle": map[string]any{"borderRadius": []int{3, 3, 0, 0}},
+		}
+		opt["color"] = []string{chartAccent2, chartAccent}
+		opt["legend"] = darkLegend([]string{"Human", "AI-tagged"})
+		opt["series"] = []map[string]any{humanSeries, aiSeries}
+	}
 	return opt
 }
 

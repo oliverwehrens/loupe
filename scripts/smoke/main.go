@@ -130,6 +130,15 @@ func assertStatus(out string) error {
 	for _, want := range []string{
 		"Bitbucket:", "Jira:", "Commits:", "Tickets:",
 		"AI-tagged",
+		// v0.2 detection upgrade — every detector that the smoke
+		// scenarios exercise should appear in the breakdown.
+		"Signals:",
+		"Co-author trailers:",
+		// PR labels aren't a Bitbucket Cloud concept, so the smoke
+		// scenarios only exercise the branch + squash detectors. The
+		// pr_label code path is covered by unit tests in analyze.
+		"Branch names:",
+		"Squash recovery:",
 	} {
 		if !strings.Contains(out, want) {
 			return fmt.Errorf("status missing %q", want)
@@ -214,6 +223,8 @@ func dispatch(w http.ResponseWriter, r *http.Request) {
 				{"slug": "agent", "name": "agent", "full_name": "beta/agent", "workspace": map[string]string{"slug": "beta"}},
 			},
 		})
+	case strings.Contains(r.URL.Path, "/pullrequests/") && strings.HasSuffix(r.URL.Path, "/commits"):
+		respond(w, map[string]any{"values": fakePRCommits(r.URL.Path)})
 	case strings.HasSuffix(r.URL.Path, "/commits"):
 		respond(w, map[string]any{"values": fakeCommits(r.URL.Path)})
 	case strings.HasSuffix(r.URL.Path, "/pullrequests"):
@@ -276,23 +287,73 @@ func fakeCommits(path string) []map[string]any {
 
 func fakePRs(path string) []map[string]any {
 	now := time.Now().UTC()
+	repoTag := repoTagFromPath(path)
 	out := make([]map[string]any, 0, 3)
-	for i := 0; i < 3; i++ {
+	// PR 0 — labelled "ai-generated", merge commit aliases an existing
+	// repo commit so the FK on ai_signals can attach the pr_label signal.
+	// PR 1 — branch prefix "copilot/feat-x" exercises branch_name detection.
+	// PR 2 — vanilla; its ListPRCommits payload carries a Claude trailer
+	// so squash_recovery has something to recover.
+	branches := []string{"feat/x", "copilot/feat-x", "feat/y"}
+	for i, branch := range branches {
 		when := now.AddDate(0, 0, -7*i)
+		merge := fmt.Sprintf("%s-c%d", repoTag, i) // alias an existing commit SHA
 		out = append(out, map[string]any{
 			"id":           100 + i,
 			"title":        fmt.Sprintf("Feature %d (%s)", i, path),
 			"state":        "MERGED",
 			"author":       map[string]any{"raw": "Alice <alice@acme.test>"},
-			"source":       map[string]any{"branch": map[string]any{"name": "feat/x"}},
+			"source":       map[string]any{"branch": map[string]any{"name": branch}},
 			"destination":  map[string]any{"branch": map[string]any{"name": "main"}},
 			"created_on":   when.Add(-2 * time.Hour).Format(time.RFC3339),
 			"updated_on":   when.Format(time.RFC3339),
 			"closed_on":    when.Format(time.RFC3339),
-			"merge_commit": map[string]string{"hash": fmt.Sprintf("merge-%d", i)},
+			"merge_commit": map[string]string{"hash": merge},
 		})
 	}
 	return out
+}
+
+// fakePRCommits returns one synthetic pre-squash commit per PR. PR #102
+// (the third PR) carries a Claude trailer so squash_recovery has
+// something to detect. Other PRs return a single trailer-less commit so
+// the endpoint exists but doesn't add signal noise.
+func fakePRCommits(path string) []map[string]any {
+	prID := lastPathSegmentBefore(path, "/commits")
+	msg := "wip"
+	if strings.HasSuffix(prID, "102") {
+		msg = "feat\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
+	}
+	return []map[string]any{
+		{
+			"hash":    "src-" + prID,
+			"author":  map[string]any{"raw": "Alice <alice@acme.test>"},
+			"date":    time.Now().UTC().Format(time.RFC3339),
+			"message": msg,
+			"parents": []any{},
+		},
+	}
+}
+
+func repoTagFromPath(path string) string {
+	u, err := url.Parse(path)
+	if err != nil {
+		return path
+	}
+	parts := strings.Split(u.Path, "/")
+	if len(parts) >= 5 {
+		return parts[3] + parts[4]
+	}
+	return path
+}
+
+func lastPathSegmentBefore(path, suffix string) string {
+	trimmed := strings.TrimSuffix(path, suffix)
+	parts := strings.Split(trimmed, "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[len(parts)-1]
 }
 
 func fakeIssues(jql string) []map[string]any {

@@ -235,16 +235,23 @@
 <section>
   <h2>Methodology</h2>
   <div class="caveats">
-    <h4>How AI signals are detected</h4>
+    <h4>High-confidence (direct evidence)</h4>
     <ul>
-      <li><b>High confidence</b> — <code>Co-Authored-By</code> trailer from Claude / Claude Code, Aider, Copilot, Cursor</li>
-      <li><b>Medium</b> — seat-holder + timing patterns (not yet implemented)</li>
-      <li><b>Low</b> — commit-shape heuristics (not used in this report)</li>
+      <li><code>Co-Authored-By</code> trailer (Claude, Aider, Copilot, Cursor, Devin, Gemini Code Assist, Jules, OpenCode)</li>
+      <li>Body footer (<code>Generated with [Claude Code]</code>, <code>Generated with [opencode]</code>)</li>
+      <li>Author identity is a known AI bot (Copilot Coding Agent, Devin, Gemini Code Assist, Jules)</li>
+      <li>PR carries an AI label or originates from an AI branch prefix (<code>copilot/</code>, <code>cursor/</code>, …)</li>
+      <li>Squash-merge recovery — trailers on pre-squash PR commits attributed to the merge SHA</li>
+    </ul>
+    <h4>Medium-confidence (inferred)</h4>
+    <ul>
+      <li>Seat-holder propagation — untagged commits from a developer who has direct AI evidence in the same week and repo</li>
+      <li>Unrecognised <code>*[bot]</code> author identity — likely automated, tool unknown</li>
     </ul>
     <p><b>Cutover:</b> {{ .CutoverText }}</p>
   </div>
   <aside class="notes">
-    Trailer detection is the only signal in v0. PR-label detection is configured but not yet wired in.
+    Confidence levels feed the chart. The throughput stack splits into "AI (evidence)" and "AI (inferred)" whenever any week has medium-confidence commits.
   </aside>
 </section>
 

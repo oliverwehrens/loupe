@@ -48,28 +48,56 @@ func runStatus(cmd *cobra.Command, args []string) error {
 // WriteStatus is the format-and-print path, separated from runStatus so
 // tests can drive it against a seeded in-memory store.
 func WriteStatus(ctx context.Context, s *store.Store, out io.Writer) error {
-	hosts, err := perGitHostStats(ctx, s.DB())
+	data, err := loadStatusData(ctx, s)
 	if err != nil {
 		return err
 	}
-	trackers, err := perTrackerStats(ctx, s.DB())
-	if err != nil {
-		return err
-	}
-	counts, err := commitCounts(ctx, s.DB())
-	if err != nil {
-		return err
-	}
-	tickets, err := count(ctx, s.DB(), "SELECT COUNT(*) FROM tickets")
-	if err != nil {
-		return err
-	}
-
-	if len(hosts) == 0 && len(trackers) == 0 && counts.total == 0 && tickets == 0 {
+	if data.empty() {
 		_, _ = fmt.Fprintln(out, "Empty state — run `loupe baseline` to index providers.")
 		return nil
 	}
+	writeHostLines(out, data.hosts)
+	writeTrackerLines(out, data.trackers)
+	writeCommitLines(out, data.counts, data.tickets)
+	writeSignalLines(out, data.signals)
+	writeBotExclusion(out, data.counts)
+	return nil
+}
 
+type statusData struct {
+	hosts    []hostStats
+	trackers []trackerStats
+	counts   commitSummary
+	tickets  int
+	signals  []signalCount
+}
+
+func (d statusData) empty() bool {
+	return len(d.hosts) == 0 && len(d.trackers) == 0 && d.counts.total == 0 && d.tickets == 0
+}
+
+func loadStatusData(ctx context.Context, s *store.Store) (statusData, error) {
+	var d statusData
+	var err error
+	if d.hosts, err = perGitHostStats(ctx, s.DB()); err != nil {
+		return d, err
+	}
+	if d.trackers, err = perTrackerStats(ctx, s.DB()); err != nil {
+		return d, err
+	}
+	if d.counts, err = commitCounts(ctx, s.DB()); err != nil {
+		return d, err
+	}
+	if d.tickets, err = count(ctx, s.DB(), "SELECT COUNT(*) FROM tickets"); err != nil {
+		return d, err
+	}
+	if d.signals, err = signalBreakdown(ctx, s.DB()); err != nil {
+		return d, err
+	}
+	return d, nil
+}
+
+func writeHostLines(out io.Writer, hosts []hostStats) {
 	for _, h := range hosts {
 		_, _ = fmt.Fprintf(out, "%-10s %d %s (%d %s)%s\n",
 			displayName(h.provider)+":",
@@ -78,6 +106,9 @@ func WriteStatus(ctx context.Context, s *store.Store, out io.Writer) error {
 			formatLastIndexed("last commit indexed", h.lastIndexed),
 		)
 	}
+}
+
+func writeTrackerLines(out io.Writer, trackers []trackerStats) {
 	for _, t := range trackers {
 		_, _ = fmt.Fprintf(out, "%-10s %d %s%s\n",
 			displayName(t.provider)+":",
@@ -85,20 +116,86 @@ func WriteStatus(ctx context.Context, s *store.Store, out io.Writer) error {
 			formatLastIndexed("last issue indexed", t.lastIndexed),
 		)
 	}
+}
 
+func writeCommitLines(out io.Writer, counts commitSummary, tickets int) {
 	aiPct := 0.0
 	if counts.total > 0 {
 		aiPct = float64(counts.ai) / float64(counts.total) * 100
 	}
 	_, _ = fmt.Fprintf(out, "%-10s %d  (%d AI-tagged, %.1f%%)\n", "Commits:", counts.total, counts.ai, aiPct)
 	_, _ = fmt.Fprintf(out, "%-10s %d\n", "Tickets:", tickets)
+}
 
-	if counts.botExcluded > 0 {
-		_, _ = fmt.Fprintf(out, "Excluded %d bot-authored commits across %d bots (%s)\n",
-			counts.botExcluded, len(counts.botDisplayNames), formatBotList(counts.botDisplayNames))
+func writeSignalLines(out io.Writer, signals []signalCount) {
+	if len(signals) == 0 {
+		return
 	}
+	_, _ = fmt.Fprintln(out, "Signals:")
+	for _, sig := range signals {
+		_, _ = fmt.Fprintf(out, "  %-18s %d\n", signalKindLabel(sig.kind)+":", sig.count)
+	}
+}
 
-	return nil
+func writeBotExclusion(out io.Writer, counts commitSummary) {
+	if counts.botExcluded == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(out, "Excluded %d bot-authored commits across %d bots (%s)\n",
+		counts.botExcluded, len(counts.botDisplayNames), formatBotList(counts.botDisplayNames))
+}
+
+type signalCount struct {
+	kind  string
+	count int
+}
+
+// signalBreakdown returns the per-signal-kind row count from ai_signals,
+// ordered by kind so the status output is stable across runs.
+func signalBreakdown(ctx context.Context, db *sql.DB) ([]signalCount, error) {
+	rows, err := db.QueryContext(ctx, `
+        SELECT signal_kind, COUNT(*)
+        FROM ai_signals
+        GROUP BY signal_kind
+        ORDER BY signal_kind
+    `)
+	if err != nil {
+		return nil, fmt.Errorf("status: signal breakdown: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []signalCount
+	for rows.Next() {
+		var sc signalCount
+		if err := rows.Scan(&sc.kind, &sc.count); err != nil {
+			return nil, fmt.Errorf("status: scan signal row: %w", err)
+		}
+		out = append(out, sc)
+	}
+	return out, rows.Err()
+}
+
+// signalKindLabel renders an ai_signals.signal_kind value into the human
+// label used in `loupe status`. Unknown kinds fall through to the raw
+// value so future detectors don't break the output silently.
+func signalKindLabel(kind string) string {
+	switch kind {
+	case analyze.KindCoAuthorTrailer:
+		return "Co-author trailers"
+	case analyze.KindBodyFooter:
+		return "Body footers"
+	case analyze.KindBotAuthor:
+		return "Bot authors"
+	case analyze.KindPRLabel:
+		return "PR labels"
+	case analyze.KindBranchName:
+		return "Branch names"
+	case analyze.KindSquashRecovery:
+		return "Squash recovery"
+	case analyze.KindSeatInference:
+		return "Seat inference"
+	default:
+		return kind
+	}
 }
 
 type hostStats struct {
@@ -197,9 +294,11 @@ func commitCounts(ctx context.Context, db *sql.DB) (commitSummary, error) {
 			return commitSummary{}, fmt.Errorf("status: scan commit row: %w", err)
 		}
 		if analyze.IsBot(email, name) {
-			out.botExcluded++
-			displayNames[analyze.BotDisplayName(email, name)] = struct{}{}
-			continue
+			if _, isAIBot := analyze.IsAIBot(email, name); !isAIBot {
+				out.botExcluded++
+				displayNames[analyze.BotDisplayName(email, name)] = struct{}{}
+				continue
+			}
 		}
 		out.total++
 		if ai == 1 {

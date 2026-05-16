@@ -67,6 +67,13 @@ func runRender(cmd *cobra.Command, args []string) error {
 }
 
 func renderFromStore(ctx context.Context, out io.Writer, cfg *config.Config, s *store.Store, override time.Time) error {
+	// Re-run detectors so changes to the detection config (new label
+	// patterns, seat-inference toggle, …) take effect on the next render
+	// without forcing a fresh ingest. All detectors are idempotent.
+	if _, err := analyze.RunAllDetectors(ctx, s, detectionConfigFor(cfg)); err != nil {
+		return fmt.Errorf("re-detect AI signals: %w", err)
+	}
+
 	weeks, err := analyze.WeeklyStats(ctx, s)
 	if err != nil {
 		return err
@@ -90,6 +97,23 @@ func renderFromStore(ctx context.Context, out io.Writer, cfg *config.Config, s *
 	_, _ = fmt.Fprintf(out, "Deck ready: %s/index.html\n", deckDir)
 	_, _ = fmt.Fprintln(out, "Run `loupe present` to view.")
 	return nil
+}
+
+// detectionConfigFor mirrors the helper in cmdbaseline. Kept here as a
+// small duplicate rather than introducing a shared cmd-internal package
+// for two callers — extract when a third use site shows up.
+func detectionConfigFor(cfg *config.Config) analyze.DetectionConfig {
+	d := cfg.AIAdoption.Detection
+	squash := true
+	if d.SquashMergeRecovery != nil {
+		squash = *d.SquashMergeRecovery
+	}
+	return analyze.DetectionConfig{
+		PRLabels:            d.PRLabels,
+		BranchPrefixes:      d.BranchPrefixes,
+		SquashMergeRecovery: squash,
+		SeatInference:       d.SeatInference,
+	}
 }
 
 func resolveCutoverOverride(cliFlag, configValue string) (time.Time, error) {
