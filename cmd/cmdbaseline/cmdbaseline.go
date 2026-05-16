@@ -328,7 +328,11 @@ func renderAndAnnounce(ctx context.Context, opts *baselineOpts, weeks []analyze.
 	if err := os.MkdirAll(filepath.Dir(deckDir), 0o750); err != nil {
 		return fmt.Errorf("create reports dir: %w", err)
 	}
-	if err := deck.RenderDeck(deckDir, opts.cfg, weeks, cutover, cycles, time.Now().UTC()); err != nil {
+	tools, err := analyze.ToolBreakdown(ctx, s)
+	if err != nil {
+		return fmt.Errorf("tool breakdown: %w", err)
+	}
+	if err := deck.RenderDeck(deckDir, opts.cfg, weeks, cutover, cycles, tools, time.Now().UTC()); err != nil {
 		return fmt.Errorf("render deck: %w", err)
 	}
 	_, _ = fmt.Fprintf(opts.out, "\nDeck ready: %s/index.html\n", deckDir)

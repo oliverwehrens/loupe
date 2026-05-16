@@ -97,7 +97,11 @@ func renderFromStore(ctx context.Context, out io.Writer, cfg *config.Config, s *
 	if err != nil {
 		return fmt.Errorf("weekly cycles: %w", err)
 	}
-	if err := deck.RenderDeck(deckDir, cfg, weeks, cutover, cycles, time.Now().UTC()); err != nil {
+	tools, err := analyze.ToolBreakdown(ctx, s)
+	if err != nil {
+		return fmt.Errorf("tool breakdown: %w", err)
+	}
+	if err := deck.RenderDeck(deckDir, cfg, weeks, cutover, cycles, tools, time.Now().UTC()); err != nil {
 		return fmt.Errorf("render deck: %w", err)
 	}
 	_, _ = fmt.Fprintf(out, "Deck ready: %s/index.html\n", deckDir)

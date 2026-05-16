@@ -21,7 +21,7 @@ func TestRenderDeck_ProducesAllArtifacts(t *testing.T) {
 	reportDate := time.Date(2026, 5, 13, 0, 0, 0, 0, time.UTC)
 
 	dir := t.TempDir()
-	if err := RenderDeck(dir, cfg, weeks, cutover, nil, reportDate); err != nil {
+	if err := RenderDeck(dir, cfg, weeks, cutover, nil, analyze.ToolBreakdownStats{}, reportDate); err != nil {
 		t.Fatalf("RenderDeck: %v", err)
 	}
 
@@ -93,7 +93,7 @@ func TestRenderDeck_IncludesCycleSlideWhenCyclesPresent(t *testing.T) {
 	reportDate := time.Date(2026, 5, 13, 0, 0, 0, 0, time.UTC)
 
 	dir := t.TempDir()
-	if err := RenderDeck(dir, cfg, weeks, cutover, cycles, reportDate); err != nil {
+	if err := RenderDeck(dir, cfg, weeks, cutover, cycles, analyze.ToolBreakdownStats{}, reportDate); err != nil {
 		t.Fatalf("RenderDeck: %v", err)
 	}
 
@@ -135,7 +135,7 @@ func TestRenderDeck_NoCutoverDetected(t *testing.T) {
 	reportDate := time.Date(2026, 5, 13, 0, 0, 0, 0, time.UTC)
 
 	dir := t.TempDir()
-	if err := RenderDeck(dir, cfg, weeks, cutover, nil, reportDate); err != nil {
+	if err := RenderDeck(dir, cfg, weeks, cutover, nil, analyze.ToolBreakdownStats{}, reportDate); err != nil {
 		t.Fatalf("RenderDeck: %v", err)
 	}
 	html, err := os.ReadFile(filepath.Join(dir, "index.html"))

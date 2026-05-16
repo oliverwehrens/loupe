@@ -69,6 +69,12 @@ type DeckData struct {
 	StatsAfterWeeks       int
 	StatsAfterCommits     float64
 	StatsAfterRatioPct    float64
+
+	// Tool attribution shown on the Stats slide. Empty when no AI
+	// signals have been recorded yet.
+	Tools             []analyze.ToolSignal
+	ToolsAvailable    bool
+	ToolsCommitsTotal int // distinct AI-tagged commits across tools
 }
 
 // RenderDeck writes a self-contained reveal.js deck under deckDir:
@@ -94,6 +100,7 @@ func RenderDeck(
 	weeks []analyze.WeekStats,
 	cutover analyze.Cutover,
 	cycles []analyze.WeekCycle,
+	tools analyze.ToolBreakdownStats,
 	reportDate time.Time,
 ) error {
 	if err := os.MkdirAll(deckDir, 0o750); err != nil {
@@ -114,6 +121,9 @@ func RenderDeck(
 	}
 
 	data := buildDeckData(cfg, weeks, cutover, cycles, reportDate)
+	data.Tools = tools.Tools
+	data.ToolsAvailable = len(tools.Tools) > 0
+	data.ToolsCommitsTotal = tools.DistinctCommits
 	data.Charts = payload
 	tmpl, err := template.New("deck").Parse(deckTemplate)
 	if err != nil {

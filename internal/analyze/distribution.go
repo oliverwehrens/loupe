@@ -1,9 +1,13 @@
 package analyze
 
 import (
+	"context"
 	"fmt"
+	"sort"
 
 	"github.com/montanaflynn/stats"
+
+	"github.com/StephanSchmidt/loupe/internal/store"
 )
 
 // Summary holds the six descriptive numbers — mean, median, p10, p90, min,
@@ -124,4 +128,77 @@ func CohortMeans(weeks []WeekStats) (commitsMean, ratioMean float64) {
 	commitsMean, _ = stats.Float64Data(commits).Mean()
 	ratioMean, _ = stats.Float64Data(ratio).Mean()
 	return commitsMean, ratioMean
+}
+
+// ToolSignal is a per-tool attribution row from ToolBreakdown.
+type ToolSignal struct {
+	// Source is the detector-tagged tool key (e.g. "claude", "copilot").
+	Source string
+	// Commits is the distinct-commit count attributed to this tool — a
+	// commit with multiple signals from the same source counts once.
+	Commits int
+	// Pct is Commits / sum(Commits) × 100 across the returned rows.
+	Pct float64
+}
+
+// ToolBreakdownStats summarises tool attribution across all AI-tagged
+// commits in the store.
+type ToolBreakdownStats struct {
+	Tools           []ToolSignal // sorted by Commits desc, then Source asc
+	TotalSignals    int          // sum of per-tool commit counts (multi-tool commits double-count)
+	DistinctCommits int          // distinct commit SHAs across all tools (excludes bot-authored)
+}
+
+// ToolBreakdown queries the ai_signals table joined to commits and
+// produces a per-tool distinct-commit count, filtering bot authors so
+// they don't drown out human-authored attribution.
+func ToolBreakdown(ctx context.Context, s *store.Store) (ToolBreakdownStats, error) {
+	rows, err := s.DB().QueryContext(ctx, `
+        SELECT sig.signal_source, sig.commit_sha, c.author_email, c.author_name
+        FROM ai_signals sig
+        JOIN commits c ON c.sha = sig.commit_sha
+    `)
+	if err != nil {
+		return ToolBreakdownStats{}, fmt.Errorf("query ai tool breakdown: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	perSource := make(map[string]map[string]struct{})
+	distinct := make(map[string]struct{})
+	for rows.Next() {
+		var source, sha, email, name string
+		if err := rows.Scan(&source, &sha, &email, &name); err != nil {
+			return ToolBreakdownStats{}, fmt.Errorf("scan tool row: %w", err)
+		}
+		if IsBot(email, name) {
+			continue
+		}
+		distinct[sha] = struct{}{}
+		if _, ok := perSource[source]; !ok {
+			perSource[source] = make(map[string]struct{})
+		}
+		perSource[source][sha] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return ToolBreakdownStats{}, err
+	}
+
+	out := ToolBreakdownStats{DistinctCommits: len(distinct)}
+	if len(perSource) == 0 {
+		return out, nil
+	}
+	for src, shas := range perSource {
+		out.Tools = append(out.Tools, ToolSignal{Source: src, Commits: len(shas)})
+		out.TotalSignals += len(shas)
+	}
+	sort.Slice(out.Tools, func(i, j int) bool {
+		if out.Tools[i].Commits != out.Tools[j].Commits {
+			return out.Tools[i].Commits > out.Tools[j].Commits
+		}
+		return out.Tools[i].Source < out.Tools[j].Source
+	})
+	for i := range out.Tools {
+		out.Tools[i].Pct = float64(out.Tools[i].Commits) / float64(out.TotalSignals) * 100
+	}
+	return out, nil
 }
