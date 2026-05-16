@@ -94,18 +94,18 @@ type wireCommit struct {
 	Committer struct {
 		Date time.Time `json:"date"`
 	} `json:"committer"`
-	Comment string `json:"comment"`
+	Comment string   `json:"comment"`
 	Parents []string `json:"parents"`
 }
 
 type wirePR struct {
-	PullRequestID int    `json:"pullRequestId"`
-	Title         string `json:"title"`
-	Status        string `json:"status"` // active | abandoned | completed | notSet
-	SourceRefName string `json:"sourceRefName"`
-	TargetRefName string `json:"targetRefName"`
-	CreationDate  time.Time  `json:"creationDate"`
-	ClosedDate    *time.Time `json:"closedDate"`
+	PullRequestID   int        `json:"pullRequestId"`
+	Title           string     `json:"title"`
+	Status          string     `json:"status"` // active | abandoned | completed | notSet
+	SourceRefName   string     `json:"sourceRefName"`
+	TargetRefName   string     `json:"targetRefName"`
+	CreationDate    time.Time  `json:"creationDate"`
+	ClosedDate      *time.Time `json:"closedDate"`
 	LastMergeCommit *struct {
 		CommitID string `json:"commitId"`
 	} `json:"lastMergeCommit"`
@@ -188,9 +188,9 @@ func (c *Client) ListCommits(ctx context.Context, repo githost.RepoRef, since ti
 		skip := 0
 		for {
 			q := url.Values{
-				"api-version":              {apiVersion},
-				"searchCriteria.$top":      {strconv.Itoa(pageSize)},
-				"searchCriteria.$skip":     {strconv.Itoa(skip)},
+				"api-version":                 {apiVersion},
+				"searchCriteria.$top":         {strconv.Itoa(pageSize)},
+				"searchCriteria.$skip":        {strconv.Itoa(skip)},
 				"searchCriteria.includeLinks": {"false"},
 			}
 			if !since.IsZero() {
@@ -240,10 +240,10 @@ func (c *Client) ListPullRequests(ctx context.Context, repo githost.RepoRef, sin
 		skip := 0
 		for {
 			q := url.Values{
-				"api-version":            {apiVersion},
-				"searchCriteria.status":  {"all"},
-				"$top":                   {strconv.Itoa(pageSize)},
-				"$skip":                  {strconv.Itoa(skip)},
+				"api-version":           {apiVersion},
+				"searchCriteria.status": {"all"},
+				"$top":                  {strconv.Itoa(pageSize)},
+				"$skip":                 {strconv.Itoa(skip)},
 			}
 			path := c.projectPath(repo.Workspace) + "/_apis/git/repositories/" + url.PathEscape(repo.Slug) + "/pullrequests"
 			var resp wireValuePRs

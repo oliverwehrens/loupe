@@ -130,11 +130,11 @@ func TestListCommits(t *testing.T) {
 		mustJSON(t, w, map[string]any{
 			"value": []map[string]any{
 				{
-					"commitId": "abc123",
-					"author":   map[string]any{"name": "Alice", "email": "a@x", "date": "2026-02-01T10:00:00Z"},
+					"commitId":  "abc123",
+					"author":    map[string]any{"name": "Alice", "email": "a@x", "date": "2026-02-01T10:00:00Z"},
 					"committer": map[string]any{"date": "2026-02-01T10:05:00Z"},
-					"comment":  "Initial",
-					"parents":  []string{"deadbeef"},
+					"comment":   "Initial",
+					"parents":   []string{"deadbeef"},
 				},
 			},
 		})

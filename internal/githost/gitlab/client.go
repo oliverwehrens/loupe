@@ -87,17 +87,17 @@ type wireCommit struct {
 }
 
 type wireMR struct {
-	IID          int        `json:"iid"`
-	Title        string     `json:"title"`
-	State        string     `json:"state"`
-	SourceBranch string     `json:"source_branch"`
-	TargetBranch string     `json:"target_branch"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	MergedAt     *time.Time `json:"merged_at"`
-	ClosedAt     *time.Time `json:"closed_at"`
-	MergeCommitSHA string   `json:"merge_commit_sha"`
-	Author       *struct {
+	IID            int        `json:"iid"`
+	Title          string     `json:"title"`
+	State          string     `json:"state"`
+	SourceBranch   string     `json:"source_branch"`
+	TargetBranch   string     `json:"target_branch"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	MergedAt       *time.Time `json:"merged_at"`
+	ClosedAt       *time.Time `json:"closed_at"`
+	MergeCommitSHA string     `json:"merge_commit_sha"`
+	Author         *struct {
 		Username string `json:"username"`
 		Bot      bool   `json:"bot"`
 	} `json:"author"`

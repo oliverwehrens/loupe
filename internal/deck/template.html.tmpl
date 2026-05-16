@@ -20,15 +20,19 @@
   /* reveal.js adds class="reveal-viewport" to <body> at init time, so a
      bare `body { background: ... }` rule loses the specificity battle
      against reveal.css's `.reveal-viewport { background: white }`.
-     Target the same class to win. */
+     Target the same class to win. The bg-fx canvas paints the actual
+     background behind everything; the colour here is a fallback for when
+     JS / canvas is unavailable. */
   html { background: var(--bg); }
   body, .reveal-viewport { background: var(--bg); margin: 0; }
   .reveal {
-    background: var(--bg);
+    background: transparent;
     color: var(--fg);
     font-family: var(--font-sans);
     font-size: 32px;
     font-weight: 400;
+    position: relative;
+    z-index: 1;
   }
   .reveal .slides { text-align: left; }
   .reveal h1, .reveal h2, .reveal h3, .reveal h4 {
@@ -145,6 +149,61 @@
     margin: 14px auto 0;
   }
 
+  /* Stats slide — compact distribution table */
+  .reveal .stats-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.6em;
+    margin: 0.3em 0 0.5em;
+  }
+  .reveal .stats-table th,
+  .reveal .stats-table td {
+    padding: 0.35em 0.6em;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+  }
+  .reveal .stats-table th {
+    color: var(--fg-muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.85em;
+  }
+  .reveal .stats-table th:first-child,
+  .reveal .stats-table td:first-child {
+    text-align: left;
+    color: var(--fg-muted);
+  }
+  .reveal .stats-table td.accent { color: var(--accent); font-weight: 600; }
+  .reveal .stats-trend {
+    font-size: 0.65em;
+    margin: 0.3em 0 0.8em;
+    color: var(--fg-muted);
+  }
+  .reveal .stats-trend .accent { color: var(--accent); font-weight: 600; }
+  .reveal .stats-cohort-grid {
+    display: flex;
+    gap: 14px;
+    margin-top: 0.4em;
+  }
+  .reveal .stats-cohort-grid > div {
+    flex: 1;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5em 0.7em;
+    font-size: 0.6em;
+  }
+  .reveal .stats-cohort-grid h4 {
+    margin: 0 0 0.2em;
+    color: var(--accent);
+    font-size: 0.95em;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+  }
+  .reveal .stats-cohort-grid p { margin: 0.15em 0; }
+
   /* Methodology / caveats — denser body type */
   .reveal .caveats {
     font-size: 0.7em;
@@ -162,6 +221,20 @@
   .reveal .caveats ul { margin: 0.2em 0 0.6em; }
   .reveal .caveats p { margin: 0.4em 0; }
 
+  /* Amiga-demo background — full-viewport canvas behind the slides
+     renders a 3-layer parallax starfield and a right-to-left sine-wave
+     scroller along the bottom. The slide stack sits at z-index: 1 above
+     it; nothing else needs to be aware of the canvas. */
+  #bg-fx {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 0;
+    pointer-events: none;
+    display: block;
+  }
+
   /* Brand logo — fixed to the viewport so it rides above every slide.
      Sits outside .reveal so it isn't affected by reveal's slide-scale transform. */
   .deck-logo {
@@ -178,6 +251,7 @@
 </style>
 </head>
 <body>
+<canvas id="bg-fx" aria-hidden="true"></canvas>
 <img class="deck-logo" src="assets/loupe.svg" alt="Loupe">
 <div class="reveal">
 <div class="slides">
@@ -231,6 +305,76 @@
     Percentage of active devs per week with at least one AI-tagged commit. The shape of the curve matters more than any single point.
   </aside>
 </section>
+
+{{ if .StatsAvailable }}
+<section>
+  <h2>Distribution</h2>
+  <table class="stats-table">
+    <thead>
+      <tr>
+        <th>Per ISO week</th>
+        <th>median</th>
+        <th>p10</th>
+        <th>p90</th>
+        <th>min</th>
+        <th>max</th>
+        <th>mean</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Commits</td>
+        <td>{{ printf "%.1f" .StatsCommits.Median }}</td>
+        <td>{{ printf "%.1f" .StatsCommits.P10 }}</td>
+        <td>{{ printf "%.1f" .StatsCommits.P90 }}</td>
+        <td>{{ printf "%.0f" .StatsCommits.Min }}</td>
+        <td>{{ printf "%.0f" .StatsCommits.Max }}</td>
+        <td>{{ printf "%.1f" .StatsCommits.Mean }}</td>
+      </tr>
+      <tr>
+        <td>AI commits</td>
+        <td>{{ printf "%.1f" .StatsAICommits.Median }}</td>
+        <td>{{ printf "%.1f" .StatsAICommits.P10 }}</td>
+        <td>{{ printf "%.1f" .StatsAICommits.P90 }}</td>
+        <td>{{ printf "%.0f" .StatsAICommits.Min }}</td>
+        <td>{{ printf "%.0f" .StatsAICommits.Max }}</td>
+        <td>{{ printf "%.1f" .StatsAICommits.Mean }}</td>
+      </tr>
+      <tr>
+        <td>AI ratio</td>
+        <td class="accent">{{ printf "%.1f%%" .StatsRatioPct.Median }}</td>
+        <td>{{ printf "%.1f%%" .StatsRatioPct.P10 }}</td>
+        <td>{{ printf "%.1f%%" .StatsRatioPct.P90 }}</td>
+        <td>{{ printf "%.1f%%" .StatsRatioPct.Min }}</td>
+        <td>{{ printf "%.1f%%" .StatsRatioPct.Max }}</td>
+        <td>{{ printf "%.1f%%" .StatsRatioPct.Mean }}</td>
+      </tr>
+    </tbody>
+  </table>
+  {{ if .StatsTrendKnown }}
+  <p class="stats-trend">Trend (AI ratio): <span class="accent">{{ printf "%+.1f pp/week" .StatsTrendSlope }}</span> ({{ .StatsTrendDirection }})</p>
+  {{ end }}
+  {{ if .StatsCutoverAvailable }}
+  <div class="stats-cohort-grid">
+    <div>
+      <h4>Before cutover</h4>
+      <p>{{ .StatsBeforeWeeks }} weeks</p>
+      <p>commits mean <span class="accent">{{ printf "%.1f" .StatsBeforeCommits }}</span></p>
+      <p>AI ratio mean <span class="accent">{{ printf "%.1f%%" .StatsBeforeRatioPct }}</span></p>
+    </div>
+    <div>
+      <h4>After cutover</h4>
+      <p>{{ .StatsAfterWeeks }} weeks</p>
+      <p>commits mean <span class="accent">{{ printf "%.1f" .StatsAfterCommits }}</span></p>
+      <p>AI ratio mean <span class="accent">{{ printf "%.1f%%" .StatsAfterRatioPct }}</span></p>
+    </div>
+  </div>
+  {{ end }}
+  <aside class="notes">
+    Distribution of weekly commit and AI-commit counts. p10 / p90 bracket the typical range, so a wide spread between them is more interesting than the mean. The cutover split compares the cohort means before vs. after the auto-detected adoption week.
+  </aside>
+</section>
+{{ end }}
 
 {{ if .CyclesAvailable }}
 <section data-chart="cycle">
@@ -421,6 +565,114 @@
       }
     });
   });
+</script>
+
+<script>
+  // ---------------------------------------------------------------------
+  // Amiga-demo background effect: 3-layer parallax starfield + a
+  // right-to-left sine-wave scroller along the bottom edge. Runs
+  // independently of reveal.js and ECharts. Honours
+  // prefers-reduced-motion (canvas stays empty, fallback bg shows).
+  // ---------------------------------------------------------------------
+  (function () {
+    const cvs = document.getElementById('bg-fx');
+    if (!cvs || typeof cvs.getContext !== 'function') return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const ctx = cvs.getContext('2d');
+    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+    let W = 0, H = 0;
+    const stars = [];
+
+    const SCROLLER_TEXT =
+      "   *** GREETINGS FROM LOUPE ***   AI ADOPTION IS REAL   ***   " +
+      "MEASURE TWICE  COMMIT ONCE   ***   NOW SHIPPING GITLAB + LINEAR + AZURE DEVOPS   ***   " +
+      "CYCLE TIME UNLOCKED   ***   THE DEMOSCENE LIVES   ***   " +
+      "ARROW KEYS NAVIGATE * ESC FOR OVERVIEW   ***   ";
+
+    function resize() {
+      W = cvs.width = Math.floor(window.innerWidth * dpr);
+      H = cvs.height = Math.floor(window.innerHeight * dpr);
+      cvs.style.width = window.innerWidth + 'px';
+      cvs.style.height = window.innerHeight + 'px';
+    }
+    window.addEventListener('resize', resize, { passive: true });
+    resize();
+
+    // Stars: 3 parallax layers. Back layer is dim and slow; front layer
+    // is bigger, brighter, and faster. Each star wraps around when it
+    // crosses the left edge.
+    function seedStars() {
+      stars.length = 0;
+      const layers = [
+        { count: 110, speed: 0.35, size: 1.0, alpha: 0.35, color: '156, 163, 175' },  // muted gray
+        { count: 70,  speed: 0.9,  size: 1.6, alpha: 0.55, color: '229, 231, 235' },  // foreground
+        { count: 30,  speed: 1.8,  size: 2.2, alpha: 0.85, color: '245, 158, 11'  },  // accent amber
+      ];
+      for (const L of layers) {
+        for (let i = 0; i < L.count; i++) {
+          stars.push({
+            x: Math.random() * W,
+            y: Math.random() * H,
+            vx: L.speed * dpr,
+            size: L.size * dpr,
+            alpha: L.alpha,
+            color: L.color,
+          });
+        }
+      }
+    }
+    seedStars();
+    window.addEventListener('resize', seedStars, { passive: true });
+
+    // Scroller font/measurement. Cache the measured width so we don't
+    // re-measure 60×/sec.
+    const scrollerFontSize = 44 * dpr;
+    const scrollerFont = 'bold ' + scrollerFontSize + 'px ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace';
+    ctx.font = scrollerFont;
+    let scrollerWidth = ctx.measureText(SCROLLER_TEXT).width;
+    let scrollX = 0;
+    const scrollSpeed = 2.4 * dpr;
+
+    function frame(t) {
+      // Solid bg matching --bg so stars over slides look intentional.
+      ctx.fillStyle = '#0b0f17';
+      ctx.fillRect(0, 0, W, H);
+
+      // Stars.
+      for (let i = 0; i < stars.length; i++) {
+        const s = stars[i];
+        s.x -= s.vx;
+        if (s.x < -s.size) {
+          s.x = W + Math.random() * 30;
+          s.y = Math.random() * H;
+        }
+        ctx.fillStyle = 'rgba(' + s.color + ', ' + s.alpha + ')';
+        ctx.fillRect(s.x, s.y, s.size, s.size);
+      }
+
+      // Scroller along the bottom — sine-wave wobble in Y, wraps in X.
+      ctx.font = scrollerFont;
+      ctx.textBaseline = 'middle';
+      const baseY = H - 60 * dpr;
+      const wobbleAmp = 14 * dpr;
+      // glow
+      ctx.shadowColor = 'rgba(245, 158, 11, 0.8)';
+      ctx.shadowBlur = 14 * dpr;
+      ctx.fillStyle = '#f59e0b';
+      let x = -((scrollX) % scrollerWidth);
+      while (x < W) {
+        const wobble = Math.sin((t / 320) + (x / 180)) * wobbleAmp;
+        ctx.fillText(SCROLLER_TEXT, x, baseY + wobble);
+        x += scrollerWidth;
+      }
+      ctx.shadowBlur = 0;
+      scrollX += scrollSpeed;
+
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  })();
 </script>
 </body>
 </html>

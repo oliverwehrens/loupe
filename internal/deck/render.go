@@ -51,6 +51,24 @@ type DeckData struct {
 	CycleFallbackPct    float64
 	MedianIdeaToDevText string
 	MedianDevToRelText  string
+
+	// Stats panel — distribution summaries derived from Weeks. Populated
+	// when there are ≥2 weeks of data; the template hides the slide when
+	// StatsAvailable is false.
+	StatsAvailable        bool
+	StatsCommits          analyze.Summary
+	StatsAICommits        analyze.Summary
+	StatsRatioPct         analyze.Summary // ratio multiplied by 100 for percentage display
+	StatsTrendSlope       float64         // percentage-points-per-week
+	StatsTrendDirection   string          // "rising" | "falling" | "flat"
+	StatsTrendKnown       bool
+	StatsCutoverAvailable bool
+	StatsBeforeWeeks      int
+	StatsBeforeCommits    float64
+	StatsBeforeRatioPct   float64
+	StatsAfterWeeks       int
+	StatsAfterCommits     float64
+	StatsAfterRatioPct    float64
 }
 
 // RenderDeck writes a self-contained reveal.js deck under deckDir:
@@ -137,6 +155,8 @@ func buildDeckData(
 		populateCycleSummary(&d, cycles)
 	}
 
+	populateStats(&d, weeks, cutover)
+
 	// Over-window distinct-author counts would need raw commit data; for v0 we
 	// take the max of any single week as a conservative proxy — fine for the
 	// headline number and keeps this code path query-free.
@@ -193,6 +213,52 @@ func populateCycleSummary(d *DeckData, cycles []analyze.WeekCycle) {
 		d.CycleFallbackPct = float64(totalFallback) / float64(totalTickets) * 100
 		d.MedianIdeaToDevText = formatHoursAsDays(sumIdeaHours / float64(totalTickets))
 		d.MedianDevToRelText = formatHoursAsDays(sumDevHours / float64(totalTickets))
+	}
+}
+
+// populateStats fills the distribution-summary fields shown on the Stats
+// slide. Requires at least 2 weeks for Summarise to succeed.
+func populateStats(d *DeckData, weeks []analyze.WeekStats, cutover analyze.Cutover) {
+	if len(weeks) < 2 {
+		return
+	}
+	commitsSer, aiSer, ratioSer := analyze.WeeklySeries(weeks)
+	cSummary, errC := analyze.Summarise(commitsSer)
+	aSummary, errA := analyze.Summarise(aiSer)
+	rSummary, errR := analyze.Summarise(ratioSer)
+	if errC != nil || errA != nil || errR != nil {
+		return
+	}
+	d.StatsAvailable = true
+	d.StatsCommits = cSummary
+	d.StatsAICommits = aSummary
+	// Convert ratio summary from 0..1 to 0..100 for display.
+	d.StatsRatioPct = analyze.Summary{
+		Mean:   rSummary.Mean * 100,
+		Median: rSummary.Median * 100,
+		P10:    rSummary.P10 * 100,
+		P90:    rSummary.P90 * 100,
+		Min:    rSummary.Min * 100,
+		Max:    rSummary.Max * 100,
+	}
+
+	if slope, dir, ok := analyze.RatioTrend(ratioSer); ok {
+		d.StatsTrendSlope = slope
+		d.StatsTrendDirection = string(dir)
+		d.StatsTrendKnown = true
+	}
+
+	if cutover.Reason != analyze.CutoverReasonNotDetected && !cutover.Date.IsZero() {
+		before, after := analyze.SplitByCutover(weeks, cutover)
+		bCommits, bRatio := analyze.CohortMeans(before)
+		aCommits, aRatio := analyze.CohortMeans(after)
+		d.StatsCutoverAvailable = len(before) > 0 && len(after) > 0
+		d.StatsBeforeWeeks = len(before)
+		d.StatsBeforeCommits = bCommits
+		d.StatsBeforeRatioPct = bRatio * 100
+		d.StatsAfterWeeks = len(after)
+		d.StatsAfterCommits = aCommits
+		d.StatsAfterRatioPct = aRatio * 100
 	}
 }
 
