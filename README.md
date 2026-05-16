@@ -9,27 +9,29 @@
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-blue?logo=dependabot)](https://github.com/StephanSchmidt/loupe/network/updates)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/StephanSchmidt/loupe/blob/main/LICENSE)
 
-Diagnostic CLI that measures the impact of AI coding assistants on engineering teams. Indexes Bitbucket Cloud and Jira Cloud via REST APIs, detects AI-assisted commits, and renders a reveal.js slide deck a CTO can present in their next exec meeting.
+A small CLI that looks at your commits and tells you how much of your codebase is being written with AI assistants. It talks to Bitbucket+Jira or GitHub, reads commit trailers, and produces a reveal.js slide deck you can show in an exec meeting.
 
-Not an analytics platform. Closer in shape to `lighthouse` or `npm audit` — run once for a baseline, run weekly to track impact. No SaaS, no login, no data leaves your environment.
+Think `lighthouse`, but for AI adoption. Run it once for a baseline, run it again in a quarter, compare. It runs locally — no SaaS account, nothing leaves your machine.
 
 ## Status
 
-**v0 — usable for an honest baseline, not yet feature-complete.**
+v0.1. The headline charts work, but a lot is still on the to-do list.
 
-Working:
-- Bitbucket Cloud and GitHub for git, Jira Cloud and GitHub Issues for tracking — all behind `githost.GitHost` / `tracker.Tracker` interfaces (GitHub Enterprise Server not yet supported)
-- Co-Authored-By trailer detection (Claude, Aider, Copilot, Cursor)
-- ISO-week aggregates plus automatic AI-adoption cutover detection (config override supported)
-- reveal.js deck with weekly throughput (human vs AI) and adoption % charts, plus PNG/SVG exports under `reports/<run>/charts/`
+What works:
 
-Not yet:
-- `loupe run` (weekly incremental) — stub
-- `loupe export` (static HTML / PDF) — stub
-- End-to-end cycle time (ticket → merged) — the headline chart from the brief
-- Per-team breakdown, quality counterweight (defects, churn)
+- Bitbucket Cloud + Jira Cloud, or GitHub on its own (one PAT plays both roles)
+- Trailer-based AI detection for Claude Code, Aider, Copilot, and Cursor
+- Auto-detected adoption cutover week, with a config override if you'd rather pin it
+- reveal.js deck with weekly throughput (human vs AI) and adoption %, plus PNG/SVG exports
+
+Not done yet:
+
+- `loupe run` for weekly incremental updates (stub)
+- `loupe export` to static HTML / PDF (stub)
+- End-to-end cycle time (ticket → merged) — this is the chart I actually wanted
+- Per-team breakdown and a quality counterweight (defects, churn)
 - Squash-merge trailer recovery via PR-commit lookup
-- GitLab / Linear providers, GitHub Enterprise Server — one package + one switch case each
+- GitLab, Linear, GitHub Enterprise Server
 
 ## Install
 
@@ -39,7 +41,7 @@ Not yet:
 brew install stephanschmidt/tap/loupe
 ```
 
-The Homebrew tap publishes a fresh bottle for macOS and Linux (Intel + Apple Silicon, amd64 + arm64) on every release.
+The Homebrew tap publishes a fresh bottle on every release, Intel and Apple Silicon.
 
 <details>
 <summary>Other install methods</summary>
@@ -58,32 +60,32 @@ The Homebrew tap publishes a fresh bottle for macOS and Linux (Intel + Apple Sil
 ## Usage
 
 ```bash
-loupe init        # interactive wizard — writes loupe.yaml (no secrets stored)
-loupe baseline    # full ingest from Bitbucket + Jira, renders a fresh deck
-loupe present     # opens the most recent deck in your browser
-loupe status      # local sqlite summary — no API calls
+loupe init        # interactive wizard, writes loupe.yaml
+loupe baseline    # ingest, then render the deck
+loupe present     # opens the latest deck in your browser
+loupe status      # local sqlite summary, no API calls
 ```
 
-`loupe baseline` prompts (echo off) for the credentials your configured providers need: Bitbucket app password + Jira API token, or a single GitHub PAT when both slots are `github`. No env vars, no keychain in v0. State is kept locally at `.loupe/state.db`; decks land under `./reports/<timestamp>/index.html`.
+`loupe baseline` prompts for credentials every time it runs (echo off). There are no env vars or keychain hooks in v0 — I'd rather not invent a key-management story before it's needed. State lives at `.loupe/state.db`; decks go under `./reports/<timestamp>/`.
 
-To analyse a single repo on a github account with 50+ repos, narrow the scope:
+If you only care about one repo on a GitHub account that has fifty others, narrow it down:
 
 ```bash
 loupe baseline --repo StephanSchmidt/loupe
 ```
 
-`--repo` filters the git host before any commit/PR API call. When both providers are `github`, the tracker project filter is auto-derived to the same value. Pass `--project KEY` explicitly to scope the tracker side independently (e.g. for a Jira project key while keeping the git host wide open).
+`--repo` filters the git host before any API call. When both providers are GitHub, the tracker filter follows automatically. Use `--project KEY` to scope the tracker side independently (a Jira project key, for instance).
 
-Alongside the interactive deck, each run also writes standalone chart exports under `./reports/<timestamp>/charts/`:
+Each run also drops standalone chart exports under `./reports/<timestamp>/charts/`:
 
-- `throughput.png`, `adoption.png` — paste straight into Slack or email
-- `throughput.svg`, `adoption.svg` — high-resolution for board docs / wikis
+- `throughput.png`, `adoption.png` for Slack and email
+- `throughput.svg`, `adoption.svg` for board docs and wikis
 
-These are static snapshots — the in-browser deck uses Apache ECharts for the interactive version.
+The in-browser deck uses Apache ECharts; the PNG/SVG files are static snapshots produced server-side.
 
 ## Config
 
-`loupe.yaml` holds non-secret coordinates only. See [`loupe.example.yaml`](loupe.example.yaml) for the full shape:
+`loupe.yaml` holds non-secret coordinates only. Full shape is in [`loupe.example.yaml`](loupe.example.yaml):
 
 ```yaml
 org: acme-eng
@@ -99,7 +101,7 @@ tracker:
   email: you@example.com
 
 ai_adoption:
-  # cutover_date: 2026-03-15   # uncomment to override auto-detection
+  # cutover_date: 2026-03-15   # uncomment to pin the cutover yourself
   detection:
     co_author_trailers: true
   min_weekly_commits_for_cutover: 0.05
@@ -112,9 +114,9 @@ output:
   path: ./reports
 ```
 
-Every workspace and Jira project the credentials can see is indexed automatically — no include/exclude lists in v0.
+Every workspace and Jira project the credentials can see is indexed. There's no include/exclude list — let me know if you actually need one.
 
-To use GitHub instead, set both providers to `github` and supply a personal access token at prompt time:
+For GitHub-only setups, set both providers to `github` and supply a PAT at prompt time:
 
 ```yaml
 git_host:
@@ -126,27 +128,26 @@ tracker:
   # base_url is optional; defaults to api.github.com
 ```
 
-Loupe will enumerate the authed user's own repos plus every org they belong to, and treat each repo with Issues enabled as a tracker project.
+Loupe enumerates your own repos plus every org you belong to, and treats each repo with Issues enabled as a tracker project.
 
-## Methodology
+## How AI detection works
 
-Loupe surfaces what it can measure honestly and refuses to overclaim.
+The primary signal is `Co-Authored-By:` trailers in commit messages. Claude Code and Aider write these by default. Copilot and Cursor usually don't, so adoption among Cursor/Copilot users will read lower than reality — the deck flags this so you don't misread the number.
 
-- **Primary signal**: `Co-Authored-By:` trailers. Claude Code and Aider write these by default; Cursor and Copilot generally do not — the asymmetry is flagged on the deck rather than papered over.
-- **Cutover detection**: first ISO week with an AI-commit ratio at or above the threshold (default 5%), or a manual date override.
-- **No ROI calculation**: dev-hours-saved depends on assumptions that don't survive technical scrutiny. Loupe refuses to guess.
-- **No "productivity +X%" headline**: throughput is always paired with whatever quality signal we can compute.
+The cutover week is the first ISO week where AI-tagged commits hit 5% of weekly commits (configurable). You can also pin a date in `loupe.yaml` if you already know it.
 
-If no AI signal is detected at all, the tool still runs — lead time and throughput ship anyway.
+There's no ROI calculation. The math you'd need — hours saved per AI-tagged commit — falls apart the moment a skeptical CFO asks where the number comes from, so I didn't add it. Throughput and adoption are what the deck shows.
+
+If no AI signal is detected, the deck still renders. Throughput and lead time don't need it.
 
 ## Adding a provider
 
-Two interfaces live in [`internal/githost/host.go`](internal/githost/host.go) and [`internal/tracker/tracker.go`](internal/tracker/tracker.go). Drop a package that implements one of them, add a case to `buildGitHost` / `buildTracker` in [`cmd/cmdbaseline/cmdbaseline.go`](cmd/cmdbaseline/cmdbaseline.go), and the rest of the pipeline (ingest, analyze, deck) needs no changes.
+Two interfaces: [`internal/githost/host.go`](internal/githost/host.go) and [`internal/tracker/tracker.go`](internal/tracker/tracker.go). Drop in a package that implements one, add a switch case to `buildGitHost` / `buildTracker` in [`cmd/cmdbaseline/cmdbaseline.go`](cmd/cmdbaseline/cmdbaseline.go), and the rest of the pipeline (ingest, analyze, deck) doesn't need to change.
 
 ## Development
 
 ```bash
-make build           # build ./bin/loupe with ldflags-injected version
+make build           # ./bin/loupe with version ldflags
 make test            # gotestsum across all packages
 make coverage-check  # fails below 80% line coverage
 make lint            # vet + staticcheck + golangci-lint + nilaway + gocyclo
@@ -155,7 +156,7 @@ make check           # lint + sec + secrets
 ./scripts/smoke.sh   # end-to-end against an in-process httptest server
 ```
 
-Go 1.26.3, `modernc.org/sqlite` (pure-Go, no CGO), GoReleaser cross-compiles linux/darwin/windows for amd64+arm64.
+Go 1.26.3, `modernc.org/sqlite` (pure Go, no CGO), GoReleaser cross-compiles linux/darwin/windows for amd64+arm64.
 
 ## License
 
