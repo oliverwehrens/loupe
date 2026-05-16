@@ -33,25 +33,27 @@ Not yet:
 
 ## Install
 
+**macOS and Linux (recommended):**
+
 ```bash
 brew install stephanschmidt/tap/loupe
 ```
 
-Or with Go:
+The Homebrew tap publishes a fresh bottle for macOS and Linux (Intel + Apple Silicon, amd64 + arm64) on every release.
 
-```bash
-go install github.com/StephanSchmidt/loupe/cmd/loupe@latest
-```
+<details>
+<summary>Other install methods</summary>
 
-Or from source:
+- **Go**: `go install github.com/StephanSchmidt/loupe/cmd/loupe@latest`
+- **Prebuilt binaries** for linux / macOS / windows on amd64 + arm64: see the [releases page](https://github.com/StephanSchmidt/loupe/releases)
+- **From source**:
+  ```bash
+  git clone https://github.com/StephanSchmidt/loupe.git
+  cd loupe
+  make build        # produces ./bin/loupe
+  ```
 
-```bash
-git clone https://github.com/StephanSchmidt/loupe.git
-cd loupe
-make build        # produces ./bin/loupe
-```
-
-Prebuilt binaries for linux / macOS / windows on amd64 + arm64 are attached to each [release](https://github.com/StephanSchmidt/loupe/releases).
+</details>
 
 ## Usage
 
