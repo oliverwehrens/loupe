@@ -9,7 +9,7 @@
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-blue?logo=dependabot)](https://github.com/StephanSchmidt/loupe/network/updates)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/StephanSchmidt/loupe/blob/main/LICENSE)
 
-A small CLI that looks at your commits and tells you how much of your codebase is being written with AI assistants. It talks to Bitbucket+Jira or GitHub, reads commit trailers, and produces a reveal.js slide deck you can show in an exec meeting.
+A small CLI that looks at your commits and tells you how much of your codebase is being written with AI assistants. It talks to Bitbucket+Jira, GitHub, GitLab, or Azure DevOps, reads commit trailers, and produces a reveal.js slide deck you can show in an exec meeting.
 
 Think `lighthouse`, but for AI adoption. Run it once for a baseline, run it again in a quarter, compare. It runs locally — no SaaS account, nothing leaves your machine.
 
@@ -19,7 +19,7 @@ v0.1. The headline charts work, but a lot is still on the to-do list.
 
 What works:
 
-- Bitbucket Cloud + Jira Cloud, or GitHub on its own (one PAT plays both roles)
+- Bitbucket Cloud + Jira Cloud, GitHub on its own, GitLab (cloud or self-hosted), or Azure DevOps — one PAT plays both roles on GitHub, GitLab, and Azure DevOps. Linear can plug in as a tracker.
 - AI detection across two confidence tiers: trailers, body footers, AI-bot author identity, PR labels, branch prefixes, and squash-merge recovery (high-confidence); seat-holder propagation (medium, opt-in)
 - Tool list: Claude Code, Aider, Copilot, Cursor, Devin, Gemini Code Assist, Jules, OpenCode
 - Auto-detected adoption cutover week, with a config override if you'd rather pin it
@@ -31,7 +31,7 @@ Not done yet:
 - `loupe export` to static HTML / PDF (stub)
 - End-to-end cycle time (ticket → merged) — this is the chart I actually wanted
 - Per-team breakdown and a quality counterweight (defects, churn)
-- GitLab, Linear, GitHub Enterprise Server
+- GitHub Enterprise Server
 
 ## Install
 
@@ -129,6 +129,46 @@ tracker:
 ```
 
 Loupe enumerates your own repos plus every org you belong to, and treats each repo with Issues enabled as a tracker project.
+
+For GitLab-only setups (cloud or self-hosted), point both providers at `gitlab` and set `base_url` to your instance — one PAT covers both:
+
+```yaml
+git_host:
+  provider: gitlab
+  base_url: https://gitlab.com           # or https://gitlab.acme.com
+
+tracker:
+  provider: gitlab
+  base_url: https://gitlab.com           # match git_host
+```
+
+Loupe walks every group the token can see (subgroups included), and treats each project as both a repo and a tracker project. Issue/merge-request filters use `path_with_namespace` (e.g. `acme/team/svc`).
+
+For Azure DevOps (cloud or Server), set both providers to `azuredevops` and supply the org name via `git_host.username`:
+
+```yaml
+git_host:
+  provider: azuredevops
+  base_url: https://dev.azure.com          # or https://devops.acme.com/tfs
+  username: myorg                          # Azure organization name
+
+tracker:
+  provider: azuredevops
+  base_url: https://dev.azure.com
+  # site is optional when git_host is also azuredevops; otherwise set
+  # site: myorg
+```
+
+Workspaces map to Team Projects, repos to Azure Git repositories, and tracker projects to the same team projects (work items are queried via WIQL).
+
+For Linear as a tracker (mix-and-match with any git host), set:
+
+```yaml
+tracker:
+  provider: linear
+  base_url: https://api.linear.app
+  # project keys are Linear team keys, e.g. "ENG"
+```
 
 ## How AI detection works
 

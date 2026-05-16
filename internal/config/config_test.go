@@ -190,8 +190,8 @@ func TestValidate_Errors(t *testing.T) {
 		},
 		{
 			name: "unsupported tracker provider",
-			yaml: "org: a\ngit_host: {provider: bitbucket-cloud, username: u}\ntracker: {provider: linear, site: s, email: e}\n",
-			want: `tracker.provider "linear" is not supported`,
+			yaml: "org: a\ngit_host: {provider: bitbucket-cloud, username: u}\ntracker: {provider: shortcut, site: s, email: e}\n",
+			want: `tracker.provider "shortcut" is not supported`,
 		},
 		{
 			name: "bad cutover date",

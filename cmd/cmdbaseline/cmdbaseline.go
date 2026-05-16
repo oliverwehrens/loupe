@@ -15,13 +15,18 @@ import (
 	"github.com/StephanSchmidt/loupe/internal/config"
 	"github.com/StephanSchmidt/loupe/internal/deck"
 	"github.com/StephanSchmidt/loupe/internal/githost"
+	adoHost "github.com/StephanSchmidt/loupe/internal/githost/azuredevops"
 	"github.com/StephanSchmidt/loupe/internal/githost/bitbucket"
 	ghHost "github.com/StephanSchmidt/loupe/internal/githost/github"
+	glHost "github.com/StephanSchmidt/loupe/internal/githost/gitlab"
 	"github.com/StephanSchmidt/loupe/internal/ingest"
 	"github.com/StephanSchmidt/loupe/internal/store"
 	"github.com/StephanSchmidt/loupe/internal/tracker"
+	adoTracker "github.com/StephanSchmidt/loupe/internal/tracker/azuredevops"
 	ghTracker "github.com/StephanSchmidt/loupe/internal/tracker/github"
+	glTracker "github.com/StephanSchmidt/loupe/internal/tracker/gitlab"
 	"github.com/StephanSchmidt/loupe/internal/tracker/jira"
+	"github.com/StephanSchmidt/loupe/internal/tracker/linear"
 )
 
 const (
@@ -129,15 +134,16 @@ func loadBaselineOpts(cmd *cobra.Command) (*baselineOpts, bool, error) {
 		return nil, false, err
 	}
 	if !dryRun {
-		// When both slots use github, a single PAT covers both — prompt
-		// once and copy the value across. Whichever CI flag was supplied
-		// (if either) seeds ensureToken so no prompt fires in that case.
-		if cfg.GitHost.Provider == config.ProviderGitHub && cfg.Tracker.Provider == config.ProviderGitHub {
+		// When both slots use the same single-PAT provider (github or
+		// gitlab), one credential covers both — prompt once and copy the
+		// value across. Whichever CI flag was supplied (if either) seeds
+		// ensureToken so no prompt fires in that case.
+		if sameSinglePATProvider(cfg) {
 			seed := gitHostToken
 			if seed == "" {
 				seed = trackerToken
 			}
-			tok, err := ensureToken(seed, "GitHub token")
+			tok, err := ensureToken(seed, gitHostTokenLabel(cfg.GitHost.Provider))
 			if err != nil {
 				return nil, false, err
 			}
@@ -153,13 +159,11 @@ func loadBaselineOpts(cmd *cobra.Command) (*baselineOpts, bool, error) {
 			}
 		}
 	}
-	// Both-github convenience: when the git host and tracker are both
-	// github and only --repo is supplied, treat it as the tracker project
-	// too. Project keys for GitHub Issues are "owner/repo", matching the
-	// repo filter's format exactly.
-	if projectFilter == "" && repoFilter != "" &&
-		cfg.GitHost.Provider == config.ProviderGitHub &&
-		cfg.Tracker.Provider == config.ProviderGitHub {
+	// Same-provider convenience: when the git host and tracker are both
+	// github (project key = "owner/repo") or both gitlab (project key =
+	// "group/.../project" matching path_with_namespace), --repo doubles as
+	// --project.
+	if projectFilter == "" && repoFilter != "" && sameSinglePATProvider(cfg) {
 		projectFilter = repoFilter
 	}
 
@@ -181,6 +185,10 @@ func gitHostTokenLabel(provider string) string {
 		return "Bitbucket app password"
 	case config.ProviderGitHub:
 		return "GitHub token (git host)"
+	case config.ProviderGitLab:
+		return "GitLab token (git host)"
+	case config.ProviderAzureDevOps:
+		return "Azure DevOps PAT (git host)"
 	default:
 		return "git host token"
 	}
@@ -192,8 +200,29 @@ func trackerTokenLabel(provider string) string {
 		return "Jira API token"
 	case config.ProviderGitHub:
 		return "GitHub token (tracker)"
+	case config.ProviderGitLab:
+		return "GitLab token (tracker)"
+	case config.ProviderLinear:
+		return "Linear API key"
+	case config.ProviderAzureDevOps:
+		return "Azure DevOps PAT (tracker)"
 	default:
 		return "tracker token"
+	}
+}
+
+// sameSinglePATProvider reports whether the configured git host and tracker
+// use the same single-PAT provider (github, gitlab, or azuredevops).
+// Same-provider configs share a credential and treat --repo == --project.
+func sameSinglePATProvider(cfg *config.Config) bool {
+	if cfg.GitHost.Provider != cfg.Tracker.Provider {
+		return false
+	}
+	switch cfg.GitHost.Provider {
+	case config.ProviderGitHub, config.ProviderGitLab, config.ProviderAzureDevOps:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -332,6 +361,11 @@ func buildGitHost(cfg *config.Config, token, baseURLOverride string) (githost.Gi
 		return bitbucket.New(base, cfg.GitHost.Username, token)
 	case config.ProviderGitHub:
 		return ghHost.New(base, token)
+	case config.ProviderGitLab:
+		return glHost.New(base, token)
+	case config.ProviderAzureDevOps:
+		// git_host.username carries the Azure organization name.
+		return adoHost.New(base, cfg.GitHost.Username, token)
 	default:
 		return nil, fmt.Errorf("unsupported git_host.provider %q", cfg.GitHost.Provider)
 	}
@@ -353,6 +387,30 @@ func buildTracker(cfg *config.Config, token, baseURLOverride string) (tracker.Tr
 			base = baseURLOverride
 		}
 		return ghTracker.New(base, token)
+	case config.ProviderGitLab:
+		base := cfg.Tracker.BaseURL
+		if baseURLOverride != "" {
+			base = baseURLOverride
+		}
+		return glTracker.New(base, token)
+	case config.ProviderLinear:
+		base := cfg.Tracker.BaseURL
+		if baseURLOverride != "" {
+			base = baseURLOverride
+		}
+		return linear.New(base, token)
+	case config.ProviderAzureDevOps:
+		base := cfg.Tracker.BaseURL
+		if baseURLOverride != "" {
+			base = baseURLOverride
+		}
+		// tracker.site carries the Azure organization; fall back to
+		// git_host.username when the git host is also Azure DevOps.
+		org := cfg.Tracker.Site
+		if org == "" {
+			org = cfg.GitHost.Username
+		}
+		return adoTracker.New(base, org, token)
 	default:
 		return nil, fmt.Errorf("unsupported tracker.provider %q", cfg.Tracker.Provider)
 	}

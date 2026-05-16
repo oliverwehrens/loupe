@@ -375,6 +375,12 @@ func displayName(provider string) string {
 		return "Jira"
 	case "github":
 		return "GitHub"
+	case "gitlab":
+		return "GitLab"
+	case "linear":
+		return "Linear"
+	case "azuredevops":
+		return "Azure DevOps"
 	default:
 		return provider
 	}

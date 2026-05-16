@@ -5,12 +5,37 @@ git_host:
   base_url: https://api.bitbucket.org/2.0
   username: you@example.com
   # Bitbucket app password is prompted at every `loupe baseline` invocation.
+  #
+  # Alternative providers:
+  #
+  # GitHub (PAT covers both git host and tracker if both are github):
+  #   provider: github
+  #   base_url: https://api.github.com
+  #
+  # GitLab (cloud or self-hosted; a single PAT covers both roles):
+  #   provider: gitlab
+  #   base_url: https://gitlab.com         # or https://gitlab.acme.com
+  #
+  # Azure DevOps (cloud or Server; PAT covers both roles):
+  #   provider: azuredevops
+  #   base_url: https://dev.azure.com      # or https://devops.acme.com/tfs
+  #   username: myorg                      # Azure organization name
 
 tracker:
   provider: jira-cloud
   site: acme.atlassian.net
   email: you@example.com
   # Jira API token is prompted at every `loupe baseline` invocation.
+  #
+  # Alternatives:
+  #   provider: github   (project keys = "owner/repo")
+  #   provider: gitlab
+  #     base_url: https://gitlab.com       # match the git_host base_url
+  #     # project keys = "group/.../project" (path_with_namespace)
+  #   provider: linear   (project keys = team key, e.g. "ENG")
+  #   provider: azuredevops
+  #     base_url: https://dev.azure.com
+  #     site: myorg                        # Azure org (optional if git_host is also azuredevops)
 
 teams:
   - name: platform

@@ -16,21 +16,29 @@ const (
 	defaultOutputPath                   = "./reports"
 	defaultBitbucketBaseURL             = "https://api.bitbucket.org/2.0"
 	defaultGitHubBaseURL                = "https://api.github.com"
+	defaultGitLabBaseURL                = "https://gitlab.com"
+	defaultLinearBaseURL                = "https://api.linear.app"
+	defaultAzureDevOpsBaseURL           = "https://dev.azure.com"
 
 	ProviderBitbucketCloud = "bitbucket-cloud"
 	ProviderJiraCloud      = "jira-cloud"
 	ProviderGitHub         = "github"
+	ProviderGitLab         = "gitlab"
+	ProviderLinear         = "linear"
+	ProviderAzureDevOps    = "azuredevops"
 )
 
 // supportedGitHostProviders lists every provider string accepted in
-// git_host.provider. Adding GitLab here + a case in the registry
+// git_host.provider. Adding a provider here + a case in the registry
 // (cmd/cmdbaseline.buildGitHost) is the full plug-in surface.
-var supportedGitHostProviders = []string{ProviderBitbucketCloud, ProviderGitHub}
+var supportedGitHostProviders = []string{ProviderBitbucketCloud, ProviderGitHub, ProviderGitLab, ProviderAzureDevOps}
 
 // supportedTrackerProviders lists every provider string accepted in
 // tracker.provider. GitHub can play either role: as a tracker it ingests
-// issues from the same repos that the git host enumerates.
-var supportedTrackerProviders = []string{ProviderJiraCloud, ProviderGitHub}
+// issues from the same repos that the git host enumerates. GitLab works
+// the same way — one PAT covers both, and project keys match Repo
+// FullName() so --repo doubles as --project. Linear is tracker-only.
+var supportedTrackerProviders = []string{ProviderJiraCloud, ProviderGitHub, ProviderGitLab, ProviderLinear, ProviderAzureDevOps}
 
 type Config struct {
 	Org        string           `yaml:"org"`
@@ -139,6 +147,25 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
+// gitHostBaseURLDefaults maps each git host provider to its default base
+// URL. Empty values mean "no built-in default" (e.g. self-hosted-only
+// providers, or providers whose host must be supplied by the user).
+var gitHostBaseURLDefaults = map[string]string{
+	ProviderBitbucketCloud: defaultBitbucketBaseURL,
+	ProviderGitHub:         defaultGitHubBaseURL,
+	ProviderGitLab:         defaultGitLabBaseURL,
+	ProviderAzureDevOps:    defaultAzureDevOpsBaseURL,
+}
+
+// trackerBaseURLDefaults is the tracker-side equivalent of
+// gitHostBaseURLDefaults.
+var trackerBaseURLDefaults = map[string]string{
+	ProviderGitHub:      defaultGitHubBaseURL,
+	ProviderGitLab:      defaultGitLabBaseURL,
+	ProviderLinear:      defaultLinearBaseURL,
+	ProviderAzureDevOps: defaultAzureDevOpsBaseURL,
+}
+
 func (c *Config) applyDefaults() {
 	if c.AIAdoption.MinWeeklyCommitsForCutover == nil {
 		v := defaultMinWeeklyAICommitsForCutover
@@ -162,14 +189,15 @@ func (c *Config) applyDefaults() {
 	if c.Output.Path == "" {
 		c.Output.Path = defaultOutputPath
 	}
-	if c.GitHost.Provider == ProviderBitbucketCloud && c.GitHost.BaseURL == "" {
-		c.GitHost.BaseURL = defaultBitbucketBaseURL
+	if c.GitHost.BaseURL == "" {
+		if v, ok := gitHostBaseURLDefaults[c.GitHost.Provider]; ok {
+			c.GitHost.BaseURL = v
+		}
 	}
-	if c.GitHost.Provider == ProviderGitHub && c.GitHost.BaseURL == "" {
-		c.GitHost.BaseURL = defaultGitHubBaseURL
-	}
-	if c.Tracker.Provider == ProviderGitHub && c.Tracker.BaseURL == "" {
-		c.Tracker.BaseURL = defaultGitHubBaseURL
+	if c.Tracker.BaseURL == "" {
+		if v, ok := trackerBaseURLDefaults[c.Tracker.Provider]; ok {
+			c.Tracker.BaseURL = v
+		}
 	}
 }
 
@@ -178,49 +206,71 @@ func (c *Config) Validate() error {
 	if c.Org == "" {
 		errs = append(errs, "org is required")
 	}
+	errs = append(errs, c.validateGitHost()...)
+	errs = append(errs, c.validateTracker()...)
+	if c.AIAdoption.CutoverDate != "" {
+		if _, err := ParseCutoverDate(c.AIAdoption.CutoverDate); err != nil {
+			errs = append(errs, fmt.Sprintf("ai_adoption.cutover_date %q: %v", c.AIAdoption.CutoverDate, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("invalid config:\n  - %s", strings.Join(errs, "\n  - "))
+	}
+	return nil
+}
 
+func (c *Config) validateGitHost() []string {
 	switch c.GitHost.Provider {
 	case "":
-		errs = append(errs, "git_host.provider is required (e.g. \"bitbucket-cloud\")")
+		return []string{"git_host.provider is required (e.g. \"bitbucket-cloud\")"}
 	case ProviderBitbucketCloud:
 		if c.GitHost.Username == "" {
-			errs = append(errs, "git_host.username is required for bitbucket-cloud")
+			return []string{"git_host.username is required for bitbucket-cloud"}
 		}
-	case ProviderGitHub:
-		// No required fields beyond Provider — the authed user's login is
-		// fetched at runtime via /user.
+		return nil
+	case ProviderAzureDevOps:
+		// Username carries the Azure DevOps organization name.
+		if c.GitHost.Username == "" {
+			return []string{"git_host.username is required for azuredevops (Azure organization name)"}
+		}
+		return nil
+	case ProviderGitHub, ProviderGitLab:
+		// No required fields beyond Provider — workspace discovery walks
+		// every namespace the credential can see.
+		return nil
 	default:
-		errs = append(errs, fmt.Sprintf("git_host.provider %q is not supported (allowed: %s)",
-			c.GitHost.Provider, strings.Join(supportedGitHostProviders, ", ")))
+		return []string{fmt.Sprintf("git_host.provider %q is not supported (allowed: %s)",
+			c.GitHost.Provider, strings.Join(supportedGitHostProviders, ", "))}
 	}
+}
 
+func (c *Config) validateTracker() []string {
 	switch c.Tracker.Provider {
 	case "":
-		errs = append(errs, "tracker.provider is required (e.g. \"jira-cloud\")")
+		return []string{"tracker.provider is required (e.g. \"jira-cloud\")"}
 	case ProviderJiraCloud:
+		var errs []string
 		if c.Tracker.Site == "" {
 			errs = append(errs, "tracker.site is required for jira-cloud")
 		}
 		if c.Tracker.Email == "" {
 			errs = append(errs, "tracker.email is required for jira-cloud")
 		}
-	case ProviderGitHub:
-		// No required fields beyond Provider.
-	default:
-		errs = append(errs, fmt.Sprintf("tracker.provider %q is not supported (allowed: %s)",
-			c.Tracker.Provider, strings.Join(supportedTrackerProviders, ", ")))
-	}
-
-	if c.AIAdoption.CutoverDate != "" {
-		if _, err := ParseCutoverDate(c.AIAdoption.CutoverDate); err != nil {
-			errs = append(errs, fmt.Sprintf("ai_adoption.cutover_date %q: %v", c.AIAdoption.CutoverDate, err))
+		return errs
+	case ProviderAzureDevOps:
+		// tracker.site carries the Azure DevOps organization name. When the
+		// git host is also azuredevops, fall back to git_host.username so
+		// the same setting isn't repeated.
+		if c.Tracker.Site == "" && c.GitHost.Provider != ProviderAzureDevOps {
+			return []string{"tracker.site is required for azuredevops (Azure organization name)"}
 		}
+		return nil
+	case ProviderGitHub, ProviderGitLab, ProviderLinear:
+		return nil
+	default:
+		return []string{fmt.Sprintf("tracker.provider %q is not supported (allowed: %s)",
+			c.Tracker.Provider, strings.Join(supportedTrackerProviders, ", "))}
 	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("invalid config:\n  - %s", strings.Join(errs, "\n  - "))
-	}
-	return nil
 }
 
 // ParseCutoverDate parses a YYYY-MM-DD config value as a UTC midnight.

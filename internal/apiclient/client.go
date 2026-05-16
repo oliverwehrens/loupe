@@ -53,6 +53,14 @@ func BearerToken(token string) AuthFunc {
 	}
 }
 
+// HeaderAuth sets an arbitrary header on every request. GitLab uses
+// PRIVATE-TOKEN; some self-hosted instances expect X-Auth-Token.
+func HeaderAuth(name, value string) AuthFunc {
+	return func(req *http.Request) {
+		req.Header.Set(name, value)
+	}
+}
+
 // NoAuth applies nothing — useful for tests that hit local httptest servers.
 func NoAuth() AuthFunc { return func(*http.Request) {} }
 
